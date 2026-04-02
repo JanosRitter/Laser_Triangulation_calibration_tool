@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (WICHTIG für dein Projekt!)
+data/
+*.npy
+*.csv
+*.json
+
+# Logs
+*.log
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Jupyter (falls später genutzt)
+.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.bak
