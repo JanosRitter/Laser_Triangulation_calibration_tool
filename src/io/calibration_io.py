@@ -8,6 +8,41 @@ from typing import Any
 import numpy as np
 
 
+# ============================================================
+# PFLICHT- UND OPTIONALE SPALTEN
+# ============================================================
+REQUIRED_OBSERVATION_COLUMNS = {
+    "frame_idx",
+    "status",
+    "crop_npy_file",
+    "crop_x0",
+    "crop_y0",
+}
+
+OPTIONAL_OBSERVATION_COLUMNS = {
+    "crop_png_file",
+    "crop_width",
+    "crop_height",
+}
+
+GROUND_TRUTH_POSE_COLUMNS = {
+    "laser_x",
+    "laser_y",
+    "laser_z",
+    "laser_rx",
+    "laser_ry",
+    "laser_rz",
+}
+
+GROUND_TRUTH_UV_COLUMNS = {
+    "u",
+    "v",
+}
+
+
+# ============================================================
+# PFADAUFLÖSUNG / BASISLADEN
+# ============================================================
 def resolve_input_folder(folder_name_or_path: str | Path) -> Path:
     """
     Löst einen Input-Ordner auf.
@@ -82,12 +117,21 @@ def _convert_csv_value(value: str):
 def load_frame_table(input_folder: str | Path) -> list[dict[str, Any]]:
     """
     Lädt frame_table.csv als Liste von Dictionaries.
+
+    WICHTIG:
+    - frame_table.csv bleibt aktuell die Pflichtdatei für die
+      Beobachtungsbeschreibung pro Frame
+    - Ground-Truth-Spalten darin sind optional
     """
     folder = resolve_input_folder(input_folder)
     frame_table_path = folder / "frame_table.csv"
 
     if not frame_table_path.exists():
-        raise FileNotFoundError(f"frame_table.csv nicht gefunden: {frame_table_path}")
+        raise FileNotFoundError(
+            f"frame_table.csv nicht gefunden: {frame_table_path}\n"
+            "Für das Kalibrierungstool wird aktuell eine frame_table.csv "
+            "mit mindestens den Beobachtungsspalten benötigt."
+        )
 
     rows = []
     with open(frame_table_path, "r", newline="", encoding="utf-8") as f:
@@ -112,6 +156,60 @@ def load_crop_array(input_folder: str | Path, crop_rel_path: str) -> np.ndarray:
     return np.load(crop_path)
 
 
+# ============================================================
+# SPALTENERKENNUNG / CAPABILITIES
+# ============================================================
+def get_frame_table_columns(frame_table: list[dict[str, Any]]) -> set[str]:
+    """
+    Gibt die vorhandenen Spaltennamen der frame_table zurück.
+    """
+    if len(frame_table) == 0:
+        return set()
+
+    return set(frame_table[0].keys())
+
+
+def has_required_observation_columns(frame_table: list[dict[str, Any]]) -> bool:
+    """
+    Prüft, ob alle für die Beobachtung nötigen Spalten vorhanden sind.
+    """
+    columns = get_frame_table_columns(frame_table)
+    return REQUIRED_OBSERVATION_COLUMNS.issubset(columns)
+
+
+def has_ground_truth_pose_columns(frame_table: list[dict[str, Any]]) -> bool:
+    """
+    Prüft, ob GT-Pose-Spalten vorhanden sind.
+    """
+    columns = get_frame_table_columns(frame_table)
+    return GROUND_TRUTH_POSE_COLUMNS.issubset(columns)
+
+
+def has_ground_truth_uv_columns(frame_table: list[dict[str, Any]]) -> bool:
+    """
+    Prüft, ob GT-UV-Spalten vorhanden sind.
+    """
+    columns = get_frame_table_columns(frame_table)
+    return GROUND_TRUTH_UV_COLUMNS.issubset(columns)
+
+
+def detect_frame_table_capabilities(frame_table: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Analysiert, welche Informationen in der frame_table vorhanden sind.
+    """
+    columns = get_frame_table_columns(frame_table)
+
+    return {
+        "columns": sorted(columns),
+        "has_required_observation_columns": has_required_observation_columns(frame_table),
+        "has_ground_truth_pose": has_ground_truth_pose_columns(frame_table),
+        "has_ground_truth_uv": has_ground_truth_uv_columns(frame_table),
+    }
+
+
+# ============================================================
+# BEOBACHTUNGSDATEN
+# ============================================================
 def is_valid_crop_row(frame_row: dict[str, Any]) -> bool:
     """
     Prüft, ob ein Frame für die Kalibrierung als Beobachtung
@@ -131,9 +229,8 @@ def build_observation_from_frame_row(frame_row: dict[str, Any]) -> dict[str, Any
     """
     Baut aus einer frame_table-Zeile eine reduzierte Beobachtungssicht.
 
-    Diese Sicht soll später nur Informationen enthalten, die das
-    Kalibrierungstool 'sehen darf' bzw. die als Mess-/Bewegungsdaten
-    interpretiert werden.
+    Diese Sicht enthält nur Informationen, die das Kalibrierungstool
+    für reale Daten auch sehen darf.
     """
     observation = {
         "frame_idx": int(frame_row["frame_idx"]),
@@ -148,13 +245,19 @@ def build_observation_from_frame_row(frame_row: dict[str, Any]) -> dict[str, Any
     return observation
 
 
-def build_ground_truth_from_frame_row(frame_row: dict[str, Any]) -> dict[str, Any]:
+# ============================================================
+# GROUND TRUTH (OPTIONAL)
+# ============================================================
+def build_ground_truth_pose_from_frame_row(frame_row: dict[str, Any]) -> dict[str, Any] | None:
     """
-    Extrahiert die Ground-Truth-Pose aus einer frame_table-Zeile.
+    Extrahiert die GT-Pose aus einer frame_table-Zeile.
 
-    Diese Information ist nur für Vergleich/Debug gedacht, nicht
-    für den späteren Solver-Input.
+    Gibt None zurück, wenn die benötigten Spalten nicht vorhanden sind.
     """
+    missing = [k for k in GROUND_TRUTH_POSE_COLUMNS if k not in frame_row]
+    if missing:
+        return None
+
     return {
         "frame_idx": int(frame_row["frame_idx"]),
         "laser_x": float(frame_row["laser_x"]),
@@ -166,20 +269,60 @@ def build_ground_truth_from_frame_row(frame_row: dict[str, Any]) -> dict[str, An
     }
 
 
+def build_ground_truth_uv_from_frame_row(frame_row: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Extrahiert GT-UV aus einer frame_table-Zeile.
+
+    Gibt None zurück, wenn u/v nicht vorhanden sind.
+    """
+    missing = [k for k in GROUND_TRUTH_UV_COLUMNS if k not in frame_row]
+    if missing:
+        return None
+
+    return {
+        "frame_idx": int(frame_row["frame_idx"]),
+        "u": float(frame_row["u"]),
+        "v": float(frame_row["v"]),
+    }
+
+
+# ============================================================
+# KOMPLETTER RUN-LOAD
+# ============================================================
 def load_calibration_run(input_folder: str | Path) -> dict[str, Any]:
     """
-    Lädt einen Simulations-Run in einer für das Kalibrierungstool
-    sinnvollen Struktur.
+    Lädt einen Run in einer für das Kalibrierungstool sinnvollen Struktur.
+
+    WICHTIG:
+    - frame_table.csv bleibt Pflicht, weil sie die Beobachtungsbeschreibung
+      (crop_npy_file, crop_x0, crop_y0, status, ...) enthält
+    - Ground-Truth-Spalten in der CSV sind optional
     """
     folder = resolve_input_folder(input_folder)
     run_metadata = load_run_metadata(folder)
     frame_table = load_frame_table(folder)
 
+    capabilities = detect_frame_table_capabilities(frame_table)
+
+    if not capabilities["has_required_observation_columns"]:
+        missing = sorted(REQUIRED_OBSERVATION_COLUMNS - get_frame_table_columns(frame_table))
+        raise ValueError(
+            "frame_table.csv enthält nicht alle benötigten Beobachtungsspalten.\n"
+            f"Fehlende Spalten: {missing}"
+        )
+
     observations = []
     frame_poses_gt = []
+    frame_uv_gt = []
 
     for row in frame_table:
-        frame_poses_gt.append(build_ground_truth_from_frame_row(row))
+        gt_pose = build_ground_truth_pose_from_frame_row(row)
+        if gt_pose is not None:
+            frame_poses_gt.append(gt_pose)
+
+        gt_uv = build_ground_truth_uv_from_frame_row(row)
+        if gt_uv is not None:
+            frame_uv_gt.append(gt_uv)
 
         if is_valid_crop_row(row):
             observations.append(build_observation_from_frame_row(row))
@@ -194,16 +337,22 @@ def load_calibration_run(input_folder: str | Path) -> dict[str, Any]:
         "ground_truth": {
             "start_pose": start_pose_gt,
             "frame_poses": frame_poses_gt,
-        }
+            "frame_uv": frame_uv_gt,
+        },
+        "capabilities": capabilities,
     }
 
 
+# ============================================================
+# SUMMARY
+# ============================================================
 def summarize_calibration_run(run_data: dict[str, Any]) -> dict[str, Any]:
     """
     Erzeugt eine kompakte Zusammenfassung für Debug-Ausgaben.
     """
     frame_table = run_data["frame_table"]
     observations = run_data["observations"]
+    capabilities = run_data.get("capabilities", {})
 
     num_total_frames = len(frame_table)
     num_valid_observations = len(observations)
@@ -215,6 +364,8 @@ def summarize_calibration_run(run_data: dict[str, Any]) -> dict[str, Any]:
         "num_valid_observations": num_valid_observations,
         "num_invalid_frames": num_invalid_frames,
         "has_start_pose_gt": run_data["ground_truth"]["start_pose"] is not None,
+        "has_ground_truth_pose": bool(capabilities.get("has_ground_truth_pose", False)),
+        "has_ground_truth_uv": bool(capabilities.get("has_ground_truth_uv", False)),
     }
 
     return summary

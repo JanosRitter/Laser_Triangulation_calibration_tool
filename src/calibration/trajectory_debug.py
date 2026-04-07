@@ -4,7 +4,6 @@ import numpy as np
 
 from src.calibration.laser_kinematics import (
     build_absolute_transforms_from_trajectory_config,
-    euler_xyz_deg_to_matrix,
     pose_xyzrpy_deg_to_transform,
 )
 
@@ -117,6 +116,18 @@ def summarize_transform_comparison(results: list[dict]) -> dict:
     }
 
 
+def can_run_trajectory_debug(run_data: dict) -> bool:
+    """
+    Prüft, ob genügend GT-Pose-Informationen für den Trajectory-Debug vorhanden sind.
+    """
+    capabilities = run_data.get("capabilities", {})
+    if capabilities:
+        return bool(capabilities.get("has_ground_truth_pose", False))
+
+    ground_truth = run_data.get("ground_truth", {})
+    return ground_truth.get("start_pose") is not None
+
+
 def run_trajectory_debug(run_data: dict) -> dict:
     """
     Führt den Trajectory-Debuglauf aus.
@@ -146,10 +157,24 @@ def run_trajectory_debug(run_data: dict) -> dict:
     }
 
 
-def print_trajectory_debug_report(debug_result: dict, first_n: int = 12) -> None:
+def run_optional_trajectory_debug(run_data: dict) -> dict | None:
+    """
+    Führt den Trajectory-Debug nur aus, wenn GT-Pose-Daten vorhanden sind.
+    """
+    if not can_run_trajectory_debug(run_data):
+        return None
+
+    return run_trajectory_debug(run_data)
+
+
+def print_trajectory_debug_report(debug_result: dict | None, first_n: int = 12) -> None:
     """
     Schöne Konsolenausgabe für den Trajectory-Debug.
     """
+    if debug_result is None:
+        print("\nℹ️ Kein Trajectory-Debug: keine Ground-Truth-Pose vorhanden.")
+        return
+
     summary = debug_result["summary"]
     comparison = debug_result["comparison"]
 
