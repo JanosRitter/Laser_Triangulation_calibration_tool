@@ -117,15 +117,16 @@ def summarize_transform_comparison(results: list[dict]) -> dict:
 
 
 def can_run_trajectory_debug(run_data: dict) -> bool:
-    """
-    Prüft, ob genügend GT-Pose-Informationen für den Trajectory-Debug vorhanden sind.
-    """
     capabilities = run_data.get("capabilities", {})
-    if capabilities:
-        return bool(capabilities.get("has_ground_truth_pose", False))
+    has_gt_pose = bool(capabilities.get("has_ground_truth_pose", False))
 
-    ground_truth = run_data.get("ground_truth", {})
-    return ground_truth.get("start_pose") is not None
+    run_metadata = run_data.get("run_metadata", {})
+    has_trajectory_config = (
+        isinstance(run_metadata.get("scan"), dict)
+        and "trajectory_config" in run_metadata["scan"]
+    )
+
+    return has_gt_pose and has_trajectory_config
 
 
 def run_trajectory_debug(run_data: dict) -> dict:

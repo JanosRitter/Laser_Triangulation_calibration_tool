@@ -36,7 +36,7 @@ from src.calibration.reporting import (
 def main():
     print("🔧 Calibration Tool – Kalibrierlauf gestartet")
 
-    folder_name = "20260427_085225_robot_calibration"
+    folder_name = "2026-04-07_09-01-51"
 
     # ---------------------------------------------------------
     # 1) Run laden
