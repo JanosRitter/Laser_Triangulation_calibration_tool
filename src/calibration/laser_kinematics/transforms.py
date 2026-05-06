@@ -128,7 +128,7 @@ def laser_ray_in_camera(
     if local_ray_origin is None:
         local_ray_origin = np.array([0.0, 0.0, 0.0], dtype=float)
     if local_ray_direction is None:
-        local_ray_direction = np.array([0.0, 0.0, 1.0], dtype=float)
+        local_ray_direction = np.array([0.0, 1.0, 0.0], dtype=float)
 
     local_ray_origin = np.asarray(local_ray_origin, dtype=float).reshape(3)
     local_ray_direction = np.asarray(local_ray_direction, dtype=float).reshape(3)

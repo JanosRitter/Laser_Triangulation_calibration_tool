@@ -23,7 +23,10 @@ from src.calibration.laser_kinematics.local_increments import (
     build_absolute_transforms_from_local_increments,
     build_relative_poses_from_local_increments,
 )
-
+from src.calibration.laser_kinematics.robot_base_offsets import (
+    build_absolute_transforms_from_robot_base_offsets,
+    build_relative_poses_from_robot_base_offsets,
+)
 
 def build_absolute_transforms_from_trajectory_config(
     trajectory_config: dict,
@@ -32,6 +35,9 @@ def build_absolute_transforms_from_trajectory_config(
 
     if trajectory_type == "local_increments":
         return build_absolute_transforms_from_local_increments(trajectory_config)
+
+    if trajectory_type == "robot_base_absolute_offsets":
+        return build_absolute_transforms_from_robot_base_offsets(trajectory_config)
 
     raise NotImplementedError(
         f"Trajektorientyp aktuell nicht unterstützt: {trajectory_type}"
@@ -45,6 +51,9 @@ def build_relative_poses_from_trajectory_config(
 
     if trajectory_type == "local_increments":
         return build_relative_poses_from_local_increments(trajectory_config)
+
+    if trajectory_type == "robot_base_absolute_offsets":
+        return build_relative_poses_from_robot_base_offsets(trajectory_config)
 
     raise NotImplementedError(
         f"Trajektorientyp aktuell nicht unterstützt: {trajectory_type}"
@@ -68,4 +77,6 @@ __all__ = [
     "build_relative_poses_from_local_increments",
     "build_absolute_transforms_from_trajectory_config",
     "build_relative_poses_from_trajectory_config",
+    "build_absolute_transforms_from_robot_base_offsets",
+    "build_relative_poses_from_robot_base_offsets",
 ]

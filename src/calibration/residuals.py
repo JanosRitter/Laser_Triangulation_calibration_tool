@@ -90,18 +90,65 @@ def compute_frame_residual(
     }
 
 
+def compute_laser_origin_bounds_penalty(
+    laser_origin: np.ndarray,
+    lower: np.ndarray,
+    upper: np.ndarray,
+    weight: float,
+) -> np.ndarray:
+    """
+    Weiche Bounds für Laser-Ray-Startpunkte.
+
+    Innerhalb der Box:
+        penalty = [0, 0, 0]
+
+    Außerhalb:
+        penalty proportional zum Abstand zur Grenze.
+
+    Einheiten:
+    - laser_origin, lower, upper in Meter
+    - weight skaliert die Strafe relativ zum geometrischen Ray-Residuum
+    """
+    laser_origin = np.asarray(laser_origin, dtype=float).reshape(3)
+    lower = np.asarray(lower, dtype=float).reshape(3)
+    upper = np.asarray(upper, dtype=float).reshape(3)
+
+    below = np.maximum(lower - laser_origin, 0.0)
+    above = np.maximum(laser_origin - upper, 0.0)
+
+    return weight * (below + above)
+
+
 def compute_residual_vector(
     params: np.ndarray,
     observations: list,
     intrinsics,
     use_weight: bool = False,
+    laser_origin_bounds: tuple[np.ndarray, np.ndarray] | None = None,
+    laser_origin_bound_weight: float = 100.0,
 ) -> np.ndarray:
     """
     Stapelt die 3D-Residuen aller Beobachtungen zu einem langen Vektor.
 
-    Für N Beobachtungen entsteht ein Vektor der Länge 3N.
+    Für N Beobachtungen entsteht normalerweise ein Vektor der Länge 3N.
+
+    Optional:
+    - laser_origin_bounds=(lower, upper) ergänzt weiche Strafresiduen,
+      falls Laser-Ray-Startpunkte außerhalb einer erlaubten Box liegen.
+
+    Beispiel:
+        lower = [-0.3, -0.1, 0.1]
+        upper = [ 0.3,  0.4, 0.3]
     """
     residual_blocks = []
+
+    lower = None
+    upper = None
+
+    if laser_origin_bounds is not None:
+        lower, upper = laser_origin_bounds
+        lower = np.asarray(lower, dtype=float).reshape(3)
+        upper = np.asarray(upper, dtype=float).reshape(3)
 
     for obs in observations:
         frame_result = compute_frame_residual(
@@ -110,7 +157,17 @@ def compute_residual_vector(
             intrinsics=intrinsics,
             use_weight=use_weight,
         )
+
         residual_blocks.append(frame_result["residual_vector"])
+
+        if laser_origin_bounds is not None:
+            penalty = compute_laser_origin_bounds_penalty(
+                laser_origin=frame_result["laser_ray_origin"],
+                lower=lower,
+                upper=upper,
+                weight=laser_origin_bound_weight,
+            )
+            residual_blocks.append(penalty)
 
     if len(residual_blocks) == 0:
         return np.zeros(0, dtype=float)

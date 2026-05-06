@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from src.io.calibration_io import load_crop_array
+from src.io.io_utils import save_fit_table_csv
 from src.fitting.crop_fitting import fit_multiple_observations
 from src.evaluation.fit_summary import (
     build_fit_results_table,
@@ -74,9 +75,26 @@ def prepare_calibration_observations(
         min_snr=4.0,
         min_amplitude=10.0,
         sigma_min=0.8,
-        sigma_max=8.0,
-        reject_near_border=True,
+        sigma_max=40.0,
+        reject_near_border=False,
     )
+    fit_table_path = run_data["input_folder"] / "laser_point_fit_table.csv"
+    save_fit_table_csv(fit_table, fit_table_path)
+    print(f"\n💾 Fit-Tabelle gespeichert: {fit_table_path}")
+    
+    #print(fit_table)
+    
+    print("\n🔎 Fit-Reject-Gründe:")
+    for row in fit_table:
+        print(
+            f"frame {row['frame_idx']:3d}: "
+            f"use={row['use_for_calibration']} | "
+            f"reason={row['reject_reason']} | "
+            f"snr={row['snr_estimate']:.3f} | "
+            f"amp={row['amplitude']:.3f} | "
+            f"sigma={row['sigma_mean']:.3f} | "
+            f"border={row['is_near_crop_border']}"
+        )
 
     calib_observations = build_calibration_observations_from_fit_table(
         run_data=run_data,
@@ -361,6 +379,11 @@ def run_calibration_without_gt(
     )
     residual_summary_initial = summarize_residuals(frame_results_initial)
 
+    laser_origin_bounds = (
+        np.array([-0.30, -0.10, 0.10], dtype=float),
+        np.array([ 0.30,  0.40, 0.30], dtype=float),
+    )
+    
     result = solve_extrinsic_pose(
         initial_params=initial_params,
         observations=calib_observations,
@@ -368,6 +391,8 @@ def run_calibration_without_gt(
         use_weight=use_weight,
         method="trf",
         verbose=0,
+        laser_origin_bounds=laser_origin_bounds,
+        laser_origin_bound_weight=100.0,
     )
     params_optimized = result.x
 

@@ -13,6 +13,8 @@ def solve_extrinsic_pose(
     use_weight: bool = False,
     method: str = "trf",
     verbose: int = 0,
+    laser_origin_bounds: tuple[np.ndarray, np.ndarray] | None = None,
+    laser_origin_bound_weight: float = 100.0,
 ):
     """
     Optimiert die 6D-Startpose des Lasers im Kamera-KS.
@@ -20,11 +22,38 @@ def solve_extrinsic_pose(
     Parameterkonvention:
         [x, y, z, rx_deg, ry_deg, rz_deg]
 
-    Returns
-    -------
-    scipy.optimize.OptimizeResult
+    Parameter-Bounds:
+    - beschränken die Startpose des Laser-Bündels.
+
+    laser_origin_bounds:
+    - optionale weiche Bounds für alle transformierten Laser-Ray-Startpunkte.
     """
     initial_params = np.asarray(initial_params, dtype=float).reshape(6)
+
+    lower_bounds = np.array([
+        -0.30,   # x [m]
+        -0.10,   # y [m]
+         0.10,   # z [m]
+        -90.0,   # rx [deg]
+        -90.0,   # ry [deg]
+        -90.0,   # rz [deg]
+    ], dtype=float)
+
+    upper_bounds = np.array([
+         0.30,   # x [m]
+         0.40,   # y [m]
+         0.30,   # z [m]
+         90.0,   # rx [deg]
+         90.0,   # ry [deg]
+         90.0,   # rz [deg]
+    ], dtype=float)
+
+    eps = 1e-9
+    initial_params = np.clip(
+        initial_params,
+        lower_bounds + eps,
+        upper_bounds - eps,
+    )
 
     def objective(params: np.ndarray) -> np.ndarray:
         return compute_residual_vector(
@@ -32,11 +61,14 @@ def solve_extrinsic_pose(
             observations=observations,
             intrinsics=intrinsics,
             use_weight=use_weight,
+            laser_origin_bounds=laser_origin_bounds,
+            laser_origin_bound_weight=laser_origin_bound_weight,
         )
 
     result = least_squares(
         fun=objective,
         x0=initial_params,
+        bounds=(lower_bounds, upper_bounds),
         method=method,
         verbose=verbose,
     )
