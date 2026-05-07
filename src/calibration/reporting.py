@@ -3,12 +3,10 @@ from __future__ import annotations
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from src.calibration.trajectory_debug import print_trajectory_debug_report
-from src.calibration.pipeline_debug import (
-    print_preparation_report,
+from src.debug.trajectory_debug import print_trajectory_debug_report
+from src.debug.gt_debug import (
     print_gt_ray_debug_report,
     print_solver_debug_report,
-    print_calibration_without_gt_report,
 )
 
 
@@ -39,6 +37,80 @@ def print_compact_preparation_summary(prep_result: dict) -> None:
 
     print("\n🧩 Kalibrierbeobachtungen aufgebaut:")
     print(f"  Anzahl: {stats['num_calib_observations']}")
+    
+def print_preparation_report(prep_result: dict) -> None:
+    stats = prep_result["stats"]
+
+    print("\n📍 Fit-Auswertung:")
+    print(f"  Erfolgreiche Fits: {stats['num_fit_ok']}/{stats['num_fit_total']}")
+
+    print("\n📊 Qualitätsbewertung:")
+    print(f"  Verwendbar für Kalibrierung: {stats['num_good']}/{stats['num_fit_table']}")
+
+    print("\n🧩 Kalibrierbeobachtungen aufgebaut:")
+    print(f"  Anzahl: {stats['num_calib_observations']}")
+    
+def print_calibration_without_gt_report(
+    calibration_result: dict,
+    first_n: int = 8,
+) -> None:
+    from src.calibration.residuals import (
+        print_residual_summary,
+        print_first_frame_residuals,
+    )
+    from src.calibration.solver import (
+        print_parameter_vector,
+        print_solver_report,
+    )
+
+    print("\n🎯 GT-freier Kalibrierlauf:")
+
+    print_parameter_vector(
+        calibration_result["params_initial"],
+        label="Initiale Startpose",
+    )
+    print_residual_summary(
+        calibration_result["residual_summary_initial"],
+        label="Residuale vor Optimierung",
+    )
+    print_first_frame_residuals(
+        calibration_result["frame_results_initial"],
+        first_n=first_n,
+        label="Erste Residuen vor Optimierung",
+    )
+
+    print_solver_report(calibration_result["solver_result"])
+    print_parameter_vector(
+        calibration_result["params_optimized"],
+        label="Optimierte Startpose",
+    )
+
+    print_residual_summary(
+        calibration_result["residual_summary_optimized"],
+        label="Residuale nach Optimierung",
+    )
+    print_first_frame_residuals(
+        calibration_result["frame_results_optimized"],
+        first_n=first_n,
+        label="Erste Residuen nach Optimierung",
+    )
+
+    print("\n📈 Vergleich vor -> nach Optimierung:")
+    print(
+        f"  mittlerer Residualbetrag: "
+        f"{calibration_result['residual_summary_initial']['mean_residual_norm_m']:.10f} m  ->  "
+        f"{calibration_result['residual_summary_optimized']['mean_residual_norm_m']:.10f} m"
+    )
+    print(
+        f"  maximaler Residualbetrag: "
+        f"{calibration_result['residual_summary_initial']['max_residual_norm_m']:.10f} m  ->  "
+        f"{calibration_result['residual_summary_optimized']['max_residual_norm_m']:.10f} m"
+    )
+    print(
+        f"  RMSE: "
+        f"{calibration_result['residual_summary_initial']['rmse_residual_m']:.10f} m  ->  "
+        f"{calibration_result['residual_summary_optimized']['rmse_residual_m']:.10f} m"
+    )
 
 
 def print_compact_gt_ray_summary(gt_ray_debug: dict | None) -> None:
