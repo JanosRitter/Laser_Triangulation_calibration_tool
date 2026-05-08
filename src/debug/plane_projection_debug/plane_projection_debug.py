@@ -500,6 +500,7 @@ def run_plane_projection_debug(
     projection_distance_m: float = 0.40,
     plane_center_robot: np.ndarray = np.array([-0.075, 0.975, 0.525]),
     local_ray_direction: np.ndarray = np.array([0.0, 1.0, 0.0]),
+    output_dir: str | Path | None = None,
 ) -> dict:
     """
     Hauptfunktion für den 2D-Ebenen-Debug.
@@ -512,6 +513,13 @@ def run_plane_projection_debug(
         plane_projection_debug.png
     """
     run_dir = Path(run_data["input_folder"])
+
+    if output_dir is None:
+        output_dir = run_dir
+    else:
+        output_dir = Path(output_dir)
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     fit_table_path = run_dir / "laser_point_fit_table.csv"
     uv_rows = load_fit_uv_table(fit_table_path)
@@ -537,13 +545,13 @@ def run_plane_projection_debug(
     )
 
     csv_path = save_plane_debug_csv(
-        run_dir / "plane_projection_debug.csv",
+        output_dir / "plane_projection_debug.csv",
         uv_points_robot=uv_points_robot,
         laser_intersections=laser_intersections,
     )
 
     plot_path = plot_uv_projection_vs_laser_intersections(
-        run_dir / "plane_projection_debug.png",
+        output_dir / "plane_projection_debug.png",
         uv_points_robot=uv_points_robot,
         laser_intersections=laser_intersections,
     )
@@ -570,9 +578,16 @@ def fit_plane_projection_debug(
     initial_center: np.ndarray = np.array([-0.075, 0.975, 0.525]),
     initial_projection_distance_m: float = 0.40,
     local_ray_direction: np.ndarray = np.array([0.0, 1.0, 0.0]),
+    output_dir: str | Path | None = None,
 ) -> dict:
     run_dir = Path(run_data["input_folder"])
     fit_table_path = run_dir / "laser_point_fit_table.csv"
+    if output_dir is None:
+        output_dir = run_dir
+    else:
+        output_dir = Path(output_dir)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     uv_rows = load_fit_uv_table(fit_table_path)
     frame_indices = [row["frame_idx"] for row in uv_rows]
@@ -700,13 +715,13 @@ def fit_plane_projection_debug(
     print(f"    max:     {np.max(residual_norms):.8f} m")
 
     csv_path = save_plane_debug_csv(
-        run_dir / "plane_projection_fit_debug.csv",
+        output_dir / "plane_projection_fit_debug.csv",
         uv_points_robot=uv_points,
         laser_intersections=laser_points,
     )
 
     plot_path = plot_uv_projection_vs_laser_intersections(
-        run_dir / "plane_projection_fit_debug.png",
+        output_dir / "plane_projection_fit_debug.png",
         uv_points_robot=uv_points,
         laser_intersections=laser_points,
     )
@@ -737,7 +752,9 @@ def fit_plane_projection_debug(
         "plot_path": str(plot_path),
     }
 
-    with open(run_dir / "plane_projection_fit_debug_result.json", "w", encoding="utf-8") as f:
+    result_json_path = output_dir / "plane_projection_fit_debug_result.json"
+
+    with open(result_json_path, "w", encoding="utf-8") as f:
         import json
         json.dump(result_dict, f, indent=2)
 

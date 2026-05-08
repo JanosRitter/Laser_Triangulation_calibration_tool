@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 from src.io.calibration_io import load_crop_array
@@ -25,6 +27,8 @@ def prepare_calibration_observations(
     method: str = "gaussian",
     threshold_factor: float = 2.5,
     subtract_background: bool = False,
+    save_fit_overlays: bool = False,
+    fit_overlay_output_dir: str | Path | None = None,
 ) -> dict:
     observations_raw = run_data["observations"]
     if len(observations_raw) == 0:
@@ -39,6 +43,8 @@ def prepare_calibration_observations(
         method=method,
         threshold_factor=threshold_factor,
         subtract_background=subtract_background,
+        save_fit_overlays=save_fit_overlays,
+        fit_overlay_output_dir=fit_overlay_output_dir,
     )
 
     fit_table = build_fit_results_table(
