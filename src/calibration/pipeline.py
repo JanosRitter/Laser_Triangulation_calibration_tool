@@ -14,12 +14,6 @@ from src.evaluation.fit_summary import (
 from src.calibration.observation_builder import (
     build_calibration_observations_from_fit_table,
 )
-from src.calibration.parameterization import zero_initial_guess
-from src.calibration.residuals import (
-    compute_frame_residuals_detailed,
-    summarize_residuals,
-)
-from src.calibration.solver import solve_extrinsic_pose
 
 
 def prepare_calibration_observations(
@@ -100,63 +94,3 @@ def prepare_calibration_observations(
     }
 
 
-def build_default_initial_guess(run_data: dict) -> np.ndarray:
-    _ = run_data
-    return zero_initial_guess()
-
-
-def run_calibration_without_gt(
-    run_data: dict,
-    calib_observations: list,
-    intrinsics,
-    initial_params: np.ndarray | None = None,
-    use_weight: bool = False,
-) -> dict:
-    if initial_params is None:
-        initial_params = build_default_initial_guess(run_data)
-
-    initial_params = np.asarray(initial_params, dtype=float).reshape(6)
-
-    frame_results_initial = compute_frame_residuals_detailed(
-        params=initial_params,
-        observations=calib_observations,
-        intrinsics=intrinsics,
-        use_weight=use_weight,
-    )
-    residual_summary_initial = summarize_residuals(frame_results_initial)
-
-    laser_origin_bounds = (
-        np.array([-0.30, -0.10, 0.10], dtype=float),
-        np.array([0.30, 0.40, 0.30], dtype=float),
-    )
-
-    result = solve_extrinsic_pose(
-        initial_params=initial_params,
-        observations=calib_observations,
-        intrinsics=intrinsics,
-        use_weight=use_weight,
-        method="trf",
-        verbose=0,
-        laser_origin_bounds=laser_origin_bounds,
-        laser_origin_bound_weight=100.0,
-    )
-
-    params_optimized = result.x
-
-    frame_results_optimized = compute_frame_residuals_detailed(
-        params=params_optimized,
-        observations=calib_observations,
-        intrinsics=intrinsics,
-        use_weight=use_weight,
-    )
-    residual_summary_optimized = summarize_residuals(frame_results_optimized)
-
-    return {
-        "params_initial": initial_params,
-        "params_optimized": params_optimized,
-        "frame_results_initial": frame_results_initial,
-        "frame_results_optimized": frame_results_optimized,
-        "residual_summary_initial": residual_summary_initial,
-        "residual_summary_optimized": residual_summary_optimized,
-        "solver_result": result,
-    }

@@ -12,12 +12,9 @@ def main() -> None:
     options = RunOptions(
         run_trajectory_debug=True,
         run_robot_ray_debug=True,
-        run_initial_pose_ray_debug=True,
-        run_plane_projection_debug=True,
-        run_gt_ray_debug=True,
-        run_gt_solver_debug=True,
-        run_optimized_pose_ray_debug=True,
-        write_debug_log=True,
+        run_initial_ray_pair_debug=True,
+        run_camera_pose_optimization= True,
+        run_optimized_ray_pair_debug= True,
     )
 
     run_calibration_app(

@@ -4,10 +4,10 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from src.debug.trajectory_debug import print_trajectory_debug_report
-from src.debug.gt_debug import (
-    print_gt_ray_debug_report,
-    print_solver_debug_report,
-)
+#from src.debug.gt_debug import (
+#    print_gt_ray_debug_report,
+#    print_solver_debug_report,
+#)
 
 
 def print_run_header(summary: dict) -> None:
