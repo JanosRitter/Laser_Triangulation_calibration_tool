@@ -95,8 +95,8 @@ def plot_ray_pairs_in_robot_frame(
     laser_rays_R: list[Ray3D],
     camera_rays_R: list[Ray3D],
     output_path: str | Path,
-    laser_ray_length: float = 0.3,
-    camera_ray_length: float = 0.4,
+    laser_ray_length: float = 0.5,
+    camera_ray_length: float = 0.45,
     max_pairs: int | None = 100,
     draw_closest_segments: bool = True,
     annotate_indices: bool = True,
@@ -136,10 +136,10 @@ def plot_ray_pairs_in_robot_frame(
 
     for i, (laser_ray, camera_ray) in enumerate(zip(laser_rays_plot, camera_rays_plot)):
         laser_p0 = laser_ray.origin
-        laser_p1 = _ray_end(laser_ray, laser_ray_length)
+        laser_p1 = _ray_end(laser_ray, 0.5)
 
         camera_p0 = camera_ray.origin
-        camera_p1 = _ray_end(camera_ray, camera_ray_length)
+        camera_p1 = _ray_end(camera_ray, 0.45)
 
         # Laser-Ray
         ax.plot(
@@ -173,7 +173,7 @@ def plot_ray_pairs_in_robot_frame(
                 "camera",
                 fontsize=9,
             )
-
+            print("Das ist die Kameraposition:", camera_p0[0], camera_p0[1], camera_p0[2])
         if draw_closest_segments:
             closest = closest_points_between_rays(
                 origin_a=laser_ray.origin,
@@ -237,15 +237,20 @@ def plot_ray_pairs_in_robot_frame(
     span = laser_max - laser_min
 
     # etwas Luft um die Laser-Geometrie
-    margin = 0.5
+    margin = 0.0
     span = span + 1.0 * margin
 
     # Mindestgröße, damit flache Geometrien nicht kollabieren
     span = np.maximum(span, 0.30)
+    
+    ax.set_xlim(-0.05, 0.05)
+    ax.set_ylim(0.5, 1.0)
+    ax.set_zlim(0.54, 1.0)
+    ax.set_box_aspect((0.14, 0.30, 0.40))
 
-    ax.set_xlim(center[0] - span[0] / 2.0, center[0] + span[0] / 2.0)
-    ax.set_ylim(center[1] - span[1] / 2.0, center[1] + span[1] / 2.0)
-    ax.set_zlim(center[2] - span[2] / 2.0, center[2] + span[2] / 2.0)
+    #ax.set_xlim(center[0] - span[0] / 2.0, center[0] + span[0] / 2.0)
+    #ax.set_ylim(center[1] - span[1] / 2.0, center[1] + span[1] / 2.0)
+    #ax.set_zlim(center[2] - span[2] / 2.0, center[2] + span[2] / 2.0)
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=200)

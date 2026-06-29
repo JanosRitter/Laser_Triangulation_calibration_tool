@@ -7,7 +7,7 @@ from src.app.calibration_app import (
 
 
 def main() -> None:
-    folder_name = "20260504_082923_robot_calibration"
+    folder_name = "20260520_095934_robot_calibration"
 
     options = RunOptions(
         run_trajectory_debug=True,

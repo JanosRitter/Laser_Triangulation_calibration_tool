@@ -17,7 +17,7 @@ DEFAULT_TOOL_OFFSET = {
     # ACHTUNG:
     # Welche Achse "vor" und "oben" ist, hängt vom Flansch-KS ab.
     # Diese Werte sind daher bewusst leicht anpassbar.
-    "translation_m": [0.0, 0.10, 0.03],
+    "translation_m": [0.0, 0.1, 0.03],
     "rotation_deg": [0.0, 0.0, 0.0],
 }
 

@@ -291,7 +291,7 @@ def pixel_to_camera_ray(
     else:
         x, y = _pixel_to_normalized_pinhole_coordinates(uv, intrinsics)
 
-    ray = np.array([x, y, 1.0], dtype=float)
+    ray = np.array([x, y, -1.0], dtype=float)
     ray /= np.linalg.norm(ray)
 
     return ray

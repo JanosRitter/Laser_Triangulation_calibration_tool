@@ -172,11 +172,32 @@ def _build_camera_reference_rays_R(
     return rays
 
 
+def _intersect_ray_with_z_plane_xy(
+    origin: np.ndarray,
+    direction: np.ndarray,
+    z_plane: float,
+) -> np.ndarray | None:
+    origin = np.asarray(origin, dtype=float).reshape(3)
+    direction = np.asarray(direction, dtype=float).reshape(3)
+
+    if abs(direction[2]) <= 1e-12:
+        return None
+
+    scale = (z_plane - origin[2]) / direction[2]
+
+    if scale < 0:
+        return None
+
+    point = origin + scale * direction
+    return point[:2]
+
+
 def _plot_camera_reference_rays_xy(
     ax,
     intrinsics: CameraIntrinsics | None,
     camera_pose_R: CameraPoseInRobotFrame | None,
     camera_reference_ray_length: float,
+    z_plane_m: float | None = None,
 ) -> np.ndarray:
     if intrinsics is None or camera_pose_R is None:
         return np.empty((0, 2), dtype=float)
@@ -207,27 +228,70 @@ def _plot_camera_reference_rays_xy(
         [float(camera_origin[0]), float(camera_origin[1])]
     ]
 
+    frame_points: dict[str, np.ndarray] = {}
+
     for label, ray_R in reference_rays_R.items():
         p0 = ray_R.origin
-        p1 = ray_R.origin + camera_reference_ray_length * ray_R.direction
+
+        if z_plane_m is not None:
+            p1_xy = _intersect_ray_with_z_plane_xy(
+                origin=ray_R.origin,
+                direction=ray_R.direction,
+                z_plane=z_plane_m,
+            )
+
+            if p1_xy is None:
+                p1 = ray_R.origin + camera_reference_ray_length * ray_R.direction
+                p1_xy = p1[:2]
+            else:
+                p1 = np.array([p1_xy[0], p1_xy[1], z_plane_m], dtype=float)
+        else:
+            p1 = ray_R.origin + camera_reference_ray_length * ray_R.direction
+            p1_xy = p1[:2]
 
         ax.plot(
-            [p0[0], p1[0]],
-            [p0[1], p1[1]],
+            [p0[0], p1_xy[0]],
+            [p0[1], p1_xy[1]],
             linewidth=1.5,
             linestyle="--",
             label=f"camera {label}" if label == "center" else None,
         )
 
         ax.text(
-            p1[0],
-            p1[1],
+            p1_xy[0],
+            p1_xy[1],
             label,
             fontsize=8,
         )
 
         plotted_points.append([float(p0[0]), float(p0[1])])
-        plotted_points.append([float(p1[0]), float(p1[1])])
+        plotted_points.append([float(p1_xy[0]), float(p1_xy[1])])
+
+        frame_points[label] = p1_xy
+
+    # Bildrahmen auf der Analyseebene verbinden
+    required = ["top_left", "top_right", "bottom_right", "bottom_left"]
+    if all(name in frame_points for name in required):
+        frame_xy = np.array(
+            [
+                frame_points["top_left"],
+                frame_points["top_right"],
+                frame_points["bottom_right"],
+                frame_points["bottom_left"],
+                frame_points["top_left"],
+            ],
+            dtype=float,
+        )
+
+        ax.plot(
+            frame_xy[:, 0],
+            frame_xy[:, 1],
+            linewidth=1.2,
+            linestyle=":",
+            label="camera image frame",
+        )
+
+        plotted_points.extend(frame_xy.tolist())
 
     return np.asarray(plotted_points, dtype=float)
 
@@ -307,6 +371,7 @@ def plot_ray_pair_distance_xy(
         intrinsics=intrinsics,
         camera_pose_R=camera_pose_R,
         camera_reference_ray_length=camera_reference_ray_length,
+        z_plane_m=analysis.fitted_z_m,
     )
 
     cbar = fig.colorbar(scatter, ax=ax)
