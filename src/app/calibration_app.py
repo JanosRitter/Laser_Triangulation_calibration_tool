@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -71,6 +72,8 @@ class RunOptions:
 def run_calibration_app(
     folder_name: str,
     options: RunOptions | None = None,
+    observation_frame_indices: list[int] | None = None,
+    result_output_dir: str | Path | None = None,
 ) -> dict | None:
     if options is None:
         options = RunOptions()
@@ -81,10 +84,32 @@ def run_calibration_app(
     # 1) Run laden
     # ---------------------------------------------------------
     run_data = load_calibration_run(folder_name)
+    if observation_frame_indices is not None:
+        selected_indices = {int(index) for index in observation_frame_indices}
+        run_data["observations"] = [
+            observation
+            for observation in run_data["observations"]
+            if int(observation["frame_idx"]) in selected_indices
+        ]
+        found_indices = {
+            int(observation["frame_idx"])
+            for observation in run_data["observations"]
+        }
+        missing_indices = selected_indices - found_indices
+        if missing_indices:
+            raise ValueError(
+                "Nicht verfügbare oder ungültige frame_idx ausgewählt: "
+                f"{sorted(missing_indices)}"
+            )
     summary = summarize_calibration_run(run_data)
     print_run_header(summary)
 
-    output_dir = run_data["input_folder"]
+    output_dir = (
+        run_data["input_folder"]
+        if result_output_dir is None
+        else Path(result_output_dir)
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
     debug_output_dir = output_dir / "debug_outputs"
     debug_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -133,6 +158,7 @@ def run_calibration_app(
         subtract_background=False,
         save_fit_overlays=options.save_fit_crop_overlays,
         fit_overlay_output_dir=debug_output_dir / "fitted_crops",
+        result_output_dir=output_dir,
     )
     print_compact_preparation_summary(prep_result)
 
@@ -332,6 +358,16 @@ def run_calibration_app(
             frame_indices=frame_indices,
         )
 
+        ray_pair_distance_analysis_optimized = analyze_ray_pair_distances(
+            laser_rays_R=laser_rays_R,
+            camera_rays_R=camera_rays_optimized_R,
+        )
+
+        print_ray_pair_distance_summary(
+            ray_pair_distance_analysis_optimized,
+            label="Optimierte Kamerapose",
+        )
+
         # -----------------------------------------------------
         # 13) Optimierte Ray-Paare gemeinsam plotten
         # -----------------------------------------------------
@@ -354,16 +390,6 @@ def run_calibration_app(
             print(
                 f"🧭 Optimierter Ray-Pair-Debug gespeichert: "
                 f"{optimized_ray_pair_debug_path}"
-            )
-
-            ray_pair_distance_analysis_optimized = analyze_ray_pair_distances(
-                laser_rays_R=laser_rays_R,
-                camera_rays_R=camera_rays_optimized_R,
-            )
-
-            print_ray_pair_distance_summary(
-                ray_pair_distance_analysis_optimized,
-                label="Optimierte Kamerapose",
             )
 
             optimized_ray_pair_distance_xy_debug_path = (

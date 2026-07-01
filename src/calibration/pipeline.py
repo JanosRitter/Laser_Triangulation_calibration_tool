@@ -23,6 +23,7 @@ def prepare_calibration_observations(
     subtract_background: bool = False,
     save_fit_overlays: bool = False,
     fit_overlay_output_dir: str | Path | None = None,
+    result_output_dir: str | Path | None = None,
 ) -> dict:
     observations_raw = run_data["observations"]
     if len(observations_raw) == 0:
@@ -56,7 +57,11 @@ def prepare_calibration_observations(
         reject_near_border=False,
     )
 
-    fit_table_path = run_data["input_folder"] / "laser_point_fit_table.csv"
+    if result_output_dir is None:
+        result_output_dir = run_data["input_folder"]
+    result_output_dir = Path(result_output_dir)
+    result_output_dir.mkdir(parents=True, exist_ok=True)
+    fit_table_path = result_output_dir / "laser_point_fit_table.csv"
     save_fit_table_csv(fit_table, fit_table_path)
     print(f"\n💾 Fit-Tabelle gespeichert: {fit_table_path}")
 
