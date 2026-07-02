@@ -269,39 +269,90 @@ def _run_single_observation_count(
 
 def _image_count_record(result: dict, observations_per_subrun: int) -> dict:
     statistics = result["statistics"]
+    records = result["records"]
     translation_std = np.asarray(
         statistics["translation"]["sample_std_mm"],
+        dtype=float,
+    )
+    translation_range = np.asarray(
+        statistics["translation"]["range_mm"],
         dtype=float,
     )
     rotation_std = np.asarray(
         statistics["rotation"]["sample_std_rotation_vector_deg"],
         dtype=float,
     )
+    mean_ray_distances_mm = np.asarray(
+        [record.mean_ray_distance_m * 1000.0 for record in records],
+        dtype=float,
+    )
+    rmse_ray_distances_mm = np.asarray(
+        [record.rmse_ray_distance_m * 1000.0 for record in records],
+        dtype=float,
+    )
+    solver_costs = np.asarray(
+        [record.solver_cost for record in records],
+        dtype=float,
+    )
+    solver_nfev = np.asarray(
+        [record.solver_nfev for record in records],
+        dtype=float,
+    )
+
+    def sample_std(values: np.ndarray) -> float:
+        return float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
 
     return {
         "observations_per_subrun": observations_per_subrun,
-        "num_successful_subruns": len(result["records"]),
+        "num_successful_subruns": len(records),
         "num_failed_subruns": len(result["failures"]),
         "translation_sample_std_x_mm": float(translation_std[0]),
         "translation_sample_std_y_mm": float(translation_std[1]),
         "translation_sample_std_z_mm": float(translation_std[2]),
+        "translation_variance_x_mm2": float(translation_std[0] ** 2),
+        "translation_variance_y_mm2": float(translation_std[1] ** 2),
+        "translation_variance_z_mm2": float(translation_std[2] ** 2),
         "translation_mean_variance_mm2": float(np.mean(translation_std**2)),
+        "translation_range_x_mm": float(translation_range[0]),
+        "translation_range_y_mm": float(translation_range[1]),
+        "translation_range_z_mm": float(translation_range[2]),
         "translation_rms_3d_deviation_mm": float(
             statistics["translation"]["rms_3d_deviation_mm"]
+        ),
+        "translation_max_3d_deviation_mm": float(
+            statistics["translation"]["max_3d_deviation_mm"]
         ),
         "rotation_sample_std_x_deg": float(rotation_std[0]),
         "rotation_sample_std_y_deg": float(rotation_std[1]),
         "rotation_sample_std_z_deg": float(rotation_std[2]),
+        "rotation_variance_x_deg2": float(rotation_std[0] ** 2),
+        "rotation_variance_y_deg2": float(rotation_std[1] ** 2),
+        "rotation_variance_z_deg2": float(rotation_std[2] ** 2),
         "rotation_mean_variance_deg2": float(np.mean(rotation_std**2)),
         "rotation_rms_angular_deviation_deg": float(
             statistics["rotation"]["rms_angular_deviation_deg"]
         ),
+        "rotation_max_angular_deviation_deg": float(
+            statistics["rotation"]["max_angular_deviation_deg"]
+        ),
         "mean_ray_distance_mm": float(
             statistics["fit_quality"]["mean_ray_distance_mm"]
         ),
+        "sample_std_mean_ray_distance_mm": sample_std(mean_ray_distances_mm),
         "mean_rmse_ray_distance_mm": float(
             statistics["fit_quality"]["mean_rmse_ray_distance_mm"]
         ),
+        "sample_std_rmse_ray_distance_mm": sample_std(rmse_ray_distances_mm),
+        "max_ray_distance_across_runs_mm": float(
+            statistics["fit_quality"]["max_ray_distance_across_runs_mm"]
+        ),
+        "solver_success_rate": float(
+            np.mean([record.solver_success for record in records])
+        ),
+        "mean_solver_cost": float(np.mean(solver_costs)),
+        "sample_std_solver_cost": sample_std(solver_costs),
+        "mean_solver_nfev": float(np.mean(solver_nfev)),
+        "sample_std_solver_nfev": sample_std(solver_nfev),
         "evaluation_dir": str(result["evaluation_dir"]),
     }
 
@@ -327,6 +378,48 @@ def _metric_summary(records: list[dict], metric: str) -> dict:
     }
 
 
+PLOT_DATA_FIELDS = [
+    "observations_per_subrun",
+    "translation_variance_x_mm2",
+    "translation_variance_y_mm2",
+    "translation_variance_z_mm2",
+    "translation_mean_variance_mm2",
+    "translation_rms_3d_deviation_mm",
+    "translation_max_3d_deviation_mm",
+    "rotation_variance_x_deg2",
+    "rotation_variance_y_deg2",
+    "rotation_variance_z_deg2",
+    "rotation_mean_variance_deg2",
+    "rotation_rms_angular_deviation_deg",
+    "rotation_max_angular_deviation_deg",
+    "mean_ray_distance_mm",
+    "sample_std_mean_ray_distance_mm",
+    "mean_rmse_ray_distance_mm",
+    "sample_std_rmse_ray_distance_mm",
+    "max_ray_distance_across_runs_mm",
+    "solver_success_rate",
+    "mean_solver_cost",
+    "sample_std_solver_cost",
+    "mean_solver_nfev",
+    "sample_std_solver_nfev",
+]
+
+
+def _write_plot_data(records: list[dict], output_path: Path) -> None:
+    sorted_records = sorted(
+        records,
+        key=lambda record: record["observations_per_subrun"],
+    )
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=PLOT_DATA_FIELDS)
+        writer.writeheader()
+        for record in sorted_records:
+            writer.writerow({
+                field: record[field]
+                for field in PLOT_DATA_FIELDS
+            })
+
+
 def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
     sorted_records = sorted(
         records,
@@ -350,7 +443,7 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
         axes[0, 1].plot(
             image_counts,
             [
-                record[f"translation_sample_std_{component}_mm"] ** 2
+                record[f"translation_variance_{component}_mm2"]
                 for record in sorted_records
             ],
             "o-",
@@ -372,7 +465,7 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
         axes[1, 1].plot(
             image_counts,
             [
-                record[f"rotation_sample_std_{component}_deg"] ** 2
+                record[f"rotation_variance_{component}_deg2"]
                 for record in sorted_records
             ],
             "o-",
@@ -390,6 +483,79 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
     fig.suptitle("Kalibrierungsstabilität über der Anzahl verwendeter Bilder")
     fig.tight_layout()
     fig.savefig(output_dir / "stability_vs_image_count.png", dpi=180)
+    plt.close(fig)
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9), sharex=True)
+    axes[0, 0].errorbar(
+        image_counts,
+        [record["mean_ray_distance_mm"] for record in sorted_records],
+        yerr=[
+            record["sample_std_mean_ray_distance_mm"]
+            for record in sorted_records
+        ],
+        fmt="o-",
+        capsize=4,
+    )
+    axes[0, 0].set_ylabel("Mittlere Ray-Distanz [mm]")
+    axes[0, 0].set_title("Mittlere Fitqualität")
+
+    axes[0, 1].errorbar(
+        image_counts,
+        [record["mean_rmse_ray_distance_mm"] for record in sorted_records],
+        yerr=[
+            record["sample_std_rmse_ray_distance_mm"]
+            for record in sorted_records
+        ],
+        fmt="o-",
+        capsize=4,
+    )
+    axes[0, 1].set_ylabel("Ray-Pair-RMSE [mm]")
+    axes[0, 1].set_title("Mittlerer RMSE")
+
+    axes[1, 0].plot(
+        image_counts,
+        [
+            record["max_ray_distance_across_runs_mm"]
+            for record in sorted_records
+        ],
+        "o-",
+    )
+    axes[1, 0].set_ylabel("Maximale Ray-Distanz [mm]")
+    axes[1, 0].set_title("Schlechtester Wert aller Subruns")
+
+    success_axis = axes[1, 1]
+    success_axis.plot(
+        image_counts,
+        [record["solver_success_rate"] * 100.0 for record in sorted_records],
+        "o-",
+        color="tab:blue",
+        label="Erfolgsquote",
+    )
+    success_axis.set_ylabel("Solver-Erfolgsquote [%]", color="tab:blue")
+    success_axis.tick_params(axis="y", labelcolor="tab:blue")
+    nfev_axis = success_axis.twinx()
+    nfev_axis.plot(
+        image_counts,
+        [record["mean_solver_nfev"] for record in sorted_records],
+        "s--",
+        color="tab:orange",
+        label="Funktionsauswertungen",
+    )
+    nfev_axis.set_ylabel(
+        "Mittlere Funktionsauswertungen",
+        color="tab:orange",
+    )
+    nfev_axis.tick_params(axis="y", labelcolor="tab:orange")
+    success_axis.set_title("Solver-Verhalten")
+
+    for axis in axes.flat:
+        axis.set_xlabel("Verwendete Bilder pro Subrun")
+        axis.set_xticks(image_counts)
+        axis.grid(True, alpha=0.3)
+
+    fig.suptitle("Fitqualität über der Anzahl verwendeter Bilder")
+    fig.tight_layout()
+    fig.savefig(output_dir / "fit_quality_vs_image_count.png", dpi=180)
     plt.close(fig)
 
 
@@ -500,8 +666,10 @@ def run_intrarun_evaluation(
         raise RuntimeError("Keine Bildanzahl konnte erfolgreich ausgewertet werden.")
 
     results_csv = evaluation_dir / "statistics_by_image_count.csv"
+    plot_data_csv = evaluation_dir / "plot_data_by_image_count.csv"
     summary_path = evaluation_dir / "image_count_evaluation_summary.json"
     _write_image_count_results(image_count_results, results_csv)
+    _write_plot_data(image_count_results, plot_data_csv)
     _save_image_count_plots(image_count_results, evaluation_dir)
 
     aggregate_metrics = {
@@ -509,10 +677,18 @@ def run_intrarun_evaluation(
         for metric in (
             "translation_mean_variance_mm2",
             "translation_rms_3d_deviation_mm",
+            "translation_max_3d_deviation_mm",
             "rotation_mean_variance_deg2",
             "rotation_rms_angular_deviation_deg",
+            "rotation_max_angular_deviation_deg",
             "mean_ray_distance_mm",
+            "sample_std_mean_ray_distance_mm",
             "mean_rmse_ray_distance_mm",
+            "sample_std_rmse_ray_distance_mm",
+            "max_ray_distance_across_runs_mm",
+            "solver_success_rate",
+            "mean_solver_cost",
+            "mean_solver_nfev",
         )
     }
     summary = {
@@ -529,6 +705,16 @@ def run_intrarun_evaluation(
         "failed_image_counts": failed_image_counts,
         "statistics_by_image_count": image_count_results,
         "statistics_across_image_counts": aggregate_metrics,
+        "artifacts": {
+            "statistics_csv": str(results_csv),
+            "plot_data_csv": str(plot_data_csv),
+            "stability_plot": str(
+                evaluation_dir / "stability_vs_image_count.png"
+            ),
+            "fit_quality_plot": str(
+                evaluation_dir / "fit_quality_vs_image_count.png"
+            ),
+        },
     }
     with summary_path.open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2, ensure_ascii=False)
@@ -544,5 +730,6 @@ def run_intrarun_evaluation(
         "failed_image_counts": failed_image_counts,
         "evaluation_dir": evaluation_dir,
         "results_csv": results_csv,
+        "plot_data_csv": plot_data_csv,
         "summary_path": summary_path,
     }
