@@ -68,8 +68,10 @@ MULTI_RUN_OUTPUT_DIR = "data/multirun_evaluation"
 # intra_run
 # ---------------------------------------------------------------------------
 INTRA_RUN_FOLDER = "20260701_081802_robot_calibration"
-OBSERVATIONS_PER_SUBRUN = 80
-NUM_SUBRUNS = 20
+# Einzelwert fuer die bisherige Auswertung oder mehrere Bildanzahlen fuer
+# eine vergleichende Stabilitaetsanalyse, z. B. [20, 40, 60, 80].
+OBSERVATIONS_PER_SUBRUN: int | list[int] = [10, 15, 20, 25, 30, 40, 50, 60]
+NUM_SUBRUNS = 15
 RANDOM_SEED = 42
 
 

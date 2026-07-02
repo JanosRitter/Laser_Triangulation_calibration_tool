@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from collections import Counter
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -95,19 +96,20 @@ def _save_sampling_plots(
     plt.close(fig)
 
 
-def run_intrarun_evaluation(
+def _run_single_observation_count(
     folder_name: str,
     observations_per_subrun: int,
     num_subruns: int,
-    random_seed: int = 42,
-    run_options: RunOptions | None = None,
+    random_seed: int,
+    run_options: RunOptions | None,
+    run_data: dict,
+    evaluation_dir: Path,
 ) -> dict:
     if observations_per_subrun <= 0:
         raise ValueError("observations_per_subrun muss positiv sein.")
     if num_subruns <= 0:
         raise ValueError("num_subruns muss positiv sein.")
 
-    run_data = load_calibration_run(folder_name)
     available_observations = run_data["observations"]
     num_available = len(available_observations)
     if observations_per_subrun > num_available:
@@ -126,12 +128,6 @@ def run_intrarun_evaluation(
             run_optimized_ray_pair_debug=False,
         )
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    evaluation_dir = (
-        Path(run_data["input_folder"])
-        / "statistical_evaluation"
-        / f"evaluation_{timestamp}"
-    )
     evaluation_dir.mkdir(parents=True, exist_ok=False)
 
     rng = np.random.default_rng(random_seed)
@@ -267,5 +263,286 @@ def run_intrarun_evaluation(
         "failures": failures,
         "statistics": statistics,
         "evaluation_dir": evaluation_dir,
+        "summary_path": summary_path,
+    }
+
+
+def _image_count_record(result: dict, observations_per_subrun: int) -> dict:
+    statistics = result["statistics"]
+    translation_std = np.asarray(
+        statistics["translation"]["sample_std_mm"],
+        dtype=float,
+    )
+    rotation_std = np.asarray(
+        statistics["rotation"]["sample_std_rotation_vector_deg"],
+        dtype=float,
+    )
+
+    return {
+        "observations_per_subrun": observations_per_subrun,
+        "num_successful_subruns": len(result["records"]),
+        "num_failed_subruns": len(result["failures"]),
+        "translation_sample_std_x_mm": float(translation_std[0]),
+        "translation_sample_std_y_mm": float(translation_std[1]),
+        "translation_sample_std_z_mm": float(translation_std[2]),
+        "translation_mean_variance_mm2": float(np.mean(translation_std**2)),
+        "translation_rms_3d_deviation_mm": float(
+            statistics["translation"]["rms_3d_deviation_mm"]
+        ),
+        "rotation_sample_std_x_deg": float(rotation_std[0]),
+        "rotation_sample_std_y_deg": float(rotation_std[1]),
+        "rotation_sample_std_z_deg": float(rotation_std[2]),
+        "rotation_mean_variance_deg2": float(np.mean(rotation_std**2)),
+        "rotation_rms_angular_deviation_deg": float(
+            statistics["rotation"]["rms_angular_deviation_deg"]
+        ),
+        "mean_ray_distance_mm": float(
+            statistics["fit_quality"]["mean_ray_distance_mm"]
+        ),
+        "mean_rmse_ray_distance_mm": float(
+            statistics["fit_quality"]["mean_rmse_ray_distance_mm"]
+        ),
+        "evaluation_dir": str(result["evaluation_dir"]),
+    }
+
+
+def _write_image_count_results(
+    records: list[dict],
+    output_path: Path,
+) -> None:
+    fieldnames = list(records[0])
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(records)
+
+
+def _metric_summary(records: list[dict], metric: str) -> dict:
+    values = np.asarray([record[metric] for record in records], dtype=float)
+    return {
+        "mean": float(np.mean(values)),
+        "sample_std": float(np.std(values, ddof=1)) if len(values) > 1 else 0.0,
+        "min": float(np.min(values)),
+        "max": float(np.max(values)),
+    }
+
+
+def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
+    sorted_records = sorted(
+        records,
+        key=lambda record: record["observations_per_subrun"],
+    )
+    image_counts = np.asarray(
+        [record["observations_per_subrun"] for record in sorted_records],
+        dtype=int,
+    )
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9), sharex=True)
+    axes[0, 0].plot(
+        image_counts,
+        [record["translation_mean_variance_mm2"] for record in sorted_records],
+        "o-",
+    )
+    axes[0, 0].set_ylabel("Mittlere Varianz [mm²]")
+    axes[0, 0].set_title("Translation")
+
+    for component in "xyz":
+        axes[0, 1].plot(
+            image_counts,
+            [
+                record[f"translation_sample_std_{component}_mm"] ** 2
+                for record in sorted_records
+            ],
+            "o-",
+            label=component,
+        )
+    axes[0, 1].set_ylabel("Varianz [mm²]")
+    axes[0, 1].set_title("Translationskomponenten")
+    axes[0, 1].legend()
+
+    axes[1, 0].plot(
+        image_counts,
+        [record["rotation_mean_variance_deg2"] for record in sorted_records],
+        "o-",
+    )
+    axes[1, 0].set_ylabel("Mittlere Varianz [deg²]")
+    axes[1, 0].set_title("Rotation")
+
+    for component in "xyz":
+        axes[1, 1].plot(
+            image_counts,
+            [
+                record[f"rotation_sample_std_{component}_deg"] ** 2
+                for record in sorted_records
+            ],
+            "o-",
+            label=component,
+        )
+    axes[1, 1].set_ylabel("Varianz [deg²]")
+    axes[1, 1].set_title("Rotationsvektorkomponenten")
+    axes[1, 1].legend()
+
+    for axis in axes.flat:
+        axis.set_xlabel("Verwendete Bilder pro Subrun")
+        axis.set_xticks(image_counts)
+        axis.grid(True, alpha=0.3)
+
+    fig.suptitle("Kalibrierungsstabilität über der Anzahl verwendeter Bilder")
+    fig.tight_layout()
+    fig.savefig(output_dir / "stability_vs_image_count.png", dpi=180)
+    plt.close(fig)
+
+
+def _normalize_observation_counts(
+    observations_per_subrun: int | Sequence[int],
+) -> tuple[list[int], bool]:
+    if isinstance(observations_per_subrun, bool):
+        raise TypeError("observations_per_subrun darf kein boolescher Wert sein.")
+
+    if isinstance(observations_per_subrun, int):
+        counts = [observations_per_subrun]
+        is_sweep = False
+    elif isinstance(observations_per_subrun, Sequence) and not isinstance(
+        observations_per_subrun, (str, bytes)
+    ):
+        counts = list(observations_per_subrun)
+        is_sweep = True
+    else:
+        raise TypeError(
+            "observations_per_subrun muss ein Integer oder eine Liste "
+            "von Integern sein."
+        )
+
+    if not counts:
+        raise ValueError("Die Liste der Bildanzahlen darf nicht leer sein.")
+    if any(isinstance(count, bool) or not isinstance(count, int) for count in counts):
+        raise TypeError("Alle Bildanzahlen müssen Integer sein.")
+    if any(count <= 0 for count in counts):
+        raise ValueError("Alle Bildanzahlen müssen positiv sein.")
+    if len(set(counts)) != len(counts):
+        raise ValueError("Bildanzahlen dürfen nicht doppelt angegeben werden.")
+
+    return counts, is_sweep
+
+
+def run_intrarun_evaluation(
+    folder_name: str,
+    observations_per_subrun: int | Sequence[int],
+    num_subruns: int,
+    random_seed: int = 42,
+    run_options: RunOptions | None = None,
+) -> dict:
+    counts, is_sweep = _normalize_observation_counts(observations_per_subrun)
+    if num_subruns <= 0:
+        raise ValueError("num_subruns muss positiv sein.")
+
+    run_data = load_calibration_run(folder_name)
+    num_available = len(run_data["observations"])
+    oversized_counts = [count for count in counts if count > num_available]
+    if oversized_counts:
+        raise ValueError(
+            f"Angeforderte Bildanzahlen {oversized_counts} überschreiten die "
+            f"{num_available} verfügbaren Beobachtungen."
+        )
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    evaluation_dir = (
+        Path(run_data["input_folder"])
+        / "statistical_evaluation"
+        / f"evaluation_{timestamp}"
+    )
+
+    if not is_sweep:
+        return _run_single_observation_count(
+            folder_name=folder_name,
+            observations_per_subrun=counts[0],
+            num_subruns=num_subruns,
+            random_seed=random_seed,
+            run_options=run_options,
+            run_data=run_data,
+            evaluation_dir=evaluation_dir,
+        )
+
+    evaluation_dir.mkdir(parents=True, exist_ok=False)
+    folder_width = max(3, len(str(max(counts))))
+    image_count_results: list[dict] = []
+    failed_image_counts: list[dict] = []
+
+    for index, count in enumerate(counts, start=1):
+        count_dir = evaluation_dir / f"{count:0{folder_width}d}_images_used"
+        print(f"\n{'#' * 72}")
+        print(f"Bildanzahl {index}/{len(counts)}: {count}")
+        print(f"{'#' * 72}")
+        try:
+            result = _run_single_observation_count(
+                folder_name=folder_name,
+                observations_per_subrun=count,
+                num_subruns=num_subruns,
+                random_seed=random_seed,
+                run_options=run_options,
+                run_data=run_data,
+                evaluation_dir=count_dir,
+            )
+            image_count_results.append(_image_count_record(result, count))
+        except Exception as exc:
+            failed_image_counts.append({
+                "observations_per_subrun": count,
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+                "evaluation_dir": str(count_dir),
+            })
+            print(
+                f"FEHLER für {count} Bilder: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+    if not image_count_results:
+        raise RuntimeError("Keine Bildanzahl konnte erfolgreich ausgewertet werden.")
+
+    results_csv = evaluation_dir / "statistics_by_image_count.csv"
+    summary_path = evaluation_dir / "image_count_evaluation_summary.json"
+    _write_image_count_results(image_count_results, results_csv)
+    _save_image_count_plots(image_count_results, evaluation_dir)
+
+    aggregate_metrics = {
+        metric: _metric_summary(image_count_results, metric)
+        for metric in (
+            "translation_mean_variance_mm2",
+            "translation_rms_3d_deviation_mm",
+            "rotation_mean_variance_deg2",
+            "rotation_rms_angular_deviation_deg",
+            "mean_ray_distance_mm",
+            "mean_rmse_ray_distance_mm",
+        )
+    }
+    summary = {
+        "created_at": datetime.now().astimezone().isoformat(),
+        "source_run": folder_name,
+        "source_run_path": str(run_data["input_folder"]),
+        "random_seed_per_image_count": random_seed,
+        "num_subruns_per_image_count": num_subruns,
+        "requested_image_counts": counts,
+        "successful_image_counts": [
+            record["observations_per_subrun"]
+            for record in image_count_results
+        ],
+        "failed_image_counts": failed_image_counts,
+        "statistics_by_image_count": image_count_results,
+        "statistics_across_image_counts": aggregate_metrics,
+    }
+    with summary_path.open("w", encoding="utf-8") as handle:
+        json.dump(summary, handle, indent=2, ensure_ascii=False)
+
+    print(f"\nBildanzahl-Auswertung gespeichert unter: {evaluation_dir}")
+    print(
+        "  Erfolgreiche Bildanzahlen: "
+        f"{len(image_count_results)}/{len(counts)}"
+    )
+
+    return {
+        "image_count_results": image_count_results,
+        "failed_image_counts": failed_image_counts,
+        "evaluation_dir": evaluation_dir,
+        "results_csv": results_csv,
         "summary_path": summary_path,
     }
