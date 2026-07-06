@@ -11,7 +11,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.app.calibration_app import RunOptions
+from src.calibration.statistical_pipeline import prepare_statistical_calibration
 from src.evaluation.intrarun_evaluation import (
+    _can_use_prepared_fast_path,
     _image_count_record,
     _run_single_observation_count,
 )
@@ -113,11 +115,18 @@ def _group_result_record(
     observations_per_subrun: int,
 ) -> dict:
     record = _image_count_record(result, observations_per_subrun)
+    mean_position_m = np.asarray(
+        result["statistics"]["translation"]["mean_m"],
+        dtype=float,
+    )
     record = {
         "group_name": group_info["name"],
         "frame_ranges": group_info["frame_ranges_label"],
         "num_nominal_frames": group_info["num_nominal_frames"],
         "num_available_observations": group_info["num_available_observations"],
+        "mean_camera_x_m": float(mean_position_m[0]),
+        "mean_camera_y_m": float(mean_position_m[1]),
+        "mean_camera_z_m": float(mean_position_m[2]),
         **record,
     }
     return record
@@ -236,6 +245,54 @@ def _save_group_comparison_plots(
     fig.savefig(output_dir / "quality_by_observation_group.png", dpi=180)
     plt.close(fig)
 
+    mean_positions_mm = np.asarray([
+        [
+            record["mean_camera_x_m"],
+            record["mean_camera_y_m"],
+            record["mean_camera_z_m"],
+        ]
+        for record in records
+    ]) * 1000.0
+    overall_mean_mm = np.mean(mean_positions_mm, axis=0)
+
+    fig = plt.figure(figsize=(12, 8))
+    axis = fig.add_subplot(111, projection="3d")
+    colors = plt.cm.tab10(np.linspace(0.0, 1.0, len(records)))
+    for index, label in enumerate(labels):
+        axis.scatter(
+            mean_positions_mm[index, 0],
+            mean_positions_mm[index, 1],
+            mean_positions_mm[index, 2],
+            color=colors[index],
+            s=75,
+            depthshade=False,
+            label=label,
+        )
+    axis.scatter(
+        overall_mean_mm[0],
+        overall_mean_mm[1],
+        overall_mean_mm[2],
+        marker="x",
+        s=140,
+        linewidths=2.5,
+        color="black",
+        label="Mittelwert aller Gruppen",
+    )
+    spans = np.ptp(mean_positions_mm, axis=0)
+    largest_span = max(float(np.max(spans)), 1e-9)
+    axis.set_box_aspect(np.maximum(spans, largest_span * 0.05))
+    axis.set_xlabel("x_R [mm]")
+    axis.set_ylabel("y_R [mm]")
+    axis.set_zlabel("z_R [mm]")
+    axis.set_title("Mittlere Kameraposition je Beobachtungsgruppe")
+    axis.legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
+    fig.tight_layout()
+    fig.savefig(
+        output_dir / "camera_mean_position_by_observation_group_3d.png",
+        dpi=180,
+    )
+    plt.close(fig)
+
 
 def run_grouped_intrarun_evaluation(
     folder_name: str,
@@ -244,6 +301,7 @@ def run_grouped_intrarun_evaluation(
     num_subruns: int,
     random_seed: int = 42,
     run_options: RunOptions | None = None,
+    max_workers: int = 1,
 ) -> dict:
     if not observation_groups:
         raise ValueError("observation_groups darf nicht leer sein.")
@@ -262,6 +320,20 @@ def run_grouped_intrarun_evaluation(
         / f"group_evaluation_{timestamp}"
     )
     evaluation_dir.mkdir(parents=True, exist_ok=False)
+    use_fast_path = _can_use_prepared_fast_path(run_options)
+    prepared_data = None
+    effective_max_workers = max_workers
+    if use_fast_path:
+        prepared_data = prepare_statistical_calibration(
+            folder_name=folder_name,
+            output_dir=evaluation_dir / "_prepared_full_run",
+        )
+    elif max_workers > 1:
+        print(
+            "Debug-Ausgaben sind aktiviert; verwende die vollständige "
+            "Pipeline sequenziell."
+        )
+        effective_max_workers = 1
 
     group_results: list[dict] = []
     group_details: list[dict] = []
@@ -298,6 +370,8 @@ def run_grouped_intrarun_evaluation(
                 run_options=run_options,
                 run_data=group_run_data,
                 evaluation_dir=group_dir,
+                prepared_data=prepared_data,
+                max_workers=effective_max_workers,
             )
             group_results.append(
                 _group_result_record(
@@ -336,6 +410,8 @@ def run_grouped_intrarun_evaluation(
             "observations_per_subrun": observations_per_subrun,
             "num_subruns_per_group": num_subruns,
             "random_seed_per_group": random_seed,
+            "prepared_fast_path": prepared_data is not None,
+            "max_workers": effective_max_workers,
         },
         "observation_groups": group_details,
         "statistics_by_observation_group": group_results,
@@ -347,6 +423,10 @@ def run_grouped_intrarun_evaluation(
             ),
             "quality_plot": str(
                 evaluation_dir / "quality_by_observation_group.png"
+            ),
+            "mean_camera_position_3d_plot": str(
+                evaluation_dir
+                / "camera_mean_position_by_observation_group_3d.png"
             ),
         },
     }

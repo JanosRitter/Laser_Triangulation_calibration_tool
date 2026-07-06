@@ -7,10 +7,8 @@ from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation
 
 from src.calibration.laser_rays import Ray3D
-from src.calibration.ray_geometry import closest_points_between_rays
 from src.calibration.camera_pose_in_robot_frame import (
     CameraPoseInRobotFrame,
-    transform_camera_rays_to_robot_frame,
 )
 
 
@@ -95,35 +93,48 @@ def _ray_pair_residuals_for_pose(
         [rx0, ry0, rz0, rx1, ry1, rz1, ...]
     """
     camera_pose_R = params_to_camera_pose(params)
+    origins_a = np.stack([ray.origin for ray in laser_rays_R])
+    directions_a = np.stack([ray.direction for ray in laser_rays_R])
+    directions_b_C = np.asarray(camera_rays_C, dtype=float).reshape(-1, 3)
+    origins_b = np.broadcast_to(camera_pose_R.translation, origins_a.shape)
+    directions_b = directions_b_C @ camera_pose_R.rotation.T
 
-    camera_rays_R = transform_camera_rays_to_robot_frame(
-        camera_rays_C=camera_rays_C,
-        camera_pose_R=camera_pose_R,
-        frame_indices=frame_indices,
+    directions_a = directions_a / np.linalg.norm(
+        directions_a, axis=1, keepdims=True
     )
+    directions_b = directions_b / np.linalg.norm(
+        directions_b, axis=1, keepdims=True
+    )
+    w0 = origins_a - origins_b
+    a = np.einsum("ij,ij->i", directions_a, directions_a)
+    b = np.einsum("ij,ij->i", directions_a, directions_b)
+    c = np.einsum("ij,ij->i", directions_b, directions_b)
+    d = np.einsum("ij,ij->i", directions_a, w0)
+    e = np.einsum("ij,ij->i", directions_b, w0)
+    denominator = a * c - b * b
 
-    residuals: list[np.ndarray] = []
+    parallel = np.abs(denominator) < 1e-12
+    lambda_a = np.zeros_like(denominator)
+    lambda_b = np.zeros_like(denominator)
+    regular = ~parallel
+    lambda_a[regular] = (
+        b[regular] * e[regular] - c[regular] * d[regular]
+    ) / denominator[regular]
+    lambda_b[regular] = (
+        a[regular] * e[regular] - b[regular] * d[regular]
+    ) / denominator[regular]
+    valid_c = parallel & (np.abs(c) > 1e-12)
+    lambda_b[valid_c] = e[valid_c] / c[valid_c]
 
-    for i, (laser_ray, camera_ray) in enumerate(zip(laser_rays_R, camera_rays_R)):
-        closest = closest_points_between_rays(
-            origin_a=laser_ray.origin,
-            direction_a=laser_ray.direction,
-            origin_b=camera_ray.origin,
-            direction_b=camera_ray.direction,
-        )
+    point_a = origins_a + lambda_a[:, None] * directions_a
+    point_b = origins_b + lambda_b[:, None] * directions_b
+    residuals = point_a - point_b
 
-        r = closest["point_a"] - closest["point_b"]
+    if weights is not None:
+        factors = np.sqrt(weights) if use_sqrt_weight else weights
+        residuals = residuals * factors[:, None]
 
-        if weights is not None:
-            w = float(weights[i])
-            if use_sqrt_weight:
-                r = np.sqrt(w) * r
-            else:
-                r = w * r
-
-        residuals.append(r)
-
-    return np.concatenate(residuals)
+    return residuals.reshape(-1)
 
 
 def _distance_stats(
@@ -132,24 +143,13 @@ def _distance_stats(
     camera_pose_R: CameraPoseInRobotFrame,
     frame_indices: list[int] | None = None,
 ) -> dict:
-    camera_rays_R = transform_camera_rays_to_robot_frame(
+    residuals = _ray_pair_residuals_for_pose(
+        params=camera_pose_to_params(camera_pose_R),
+        laser_rays_R=laser_rays_R,
         camera_rays_C=camera_rays_C,
-        camera_pose_R=camera_pose_R,
         frame_indices=frame_indices,
-    )
-
-    distances = []
-
-    for laser_ray, camera_ray in zip(laser_rays_R, camera_rays_R):
-        closest = closest_points_between_rays(
-            origin_a=laser_ray.origin,
-            direction_a=laser_ray.direction,
-            origin_b=camera_ray.origin,
-            direction_b=camera_ray.direction,
-        )
-        distances.append(float(closest["distance"]))
-
-    distances = np.asarray(distances, dtype=float)
+    ).reshape(-1, 3)
+    distances = np.linalg.norm(residuals, axis=1)
 
     return {
         "mean": float(np.mean(distances)),

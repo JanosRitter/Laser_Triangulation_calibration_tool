@@ -4,6 +4,7 @@ import csv
 import json
 from collections import Counter
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +12,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.app.calibration_app import RunOptions, run_calibration_app
+from src.calibration.statistical_pipeline import (
+    PreparedStatisticalCalibration,
+    prepare_statistical_calibration,
+    run_prepared_statistical_calibration,
+)
 from src.evaluation.multirun_evaluation import (
     MultiRunRecord,
     _build_statistics,
@@ -19,6 +25,18 @@ from src.evaluation.multirun_evaluation import (
     _write_results_csv,
 )
 from src.io.calibration_io import load_calibration_run
+
+
+def _can_use_prepared_fast_path(run_options: RunOptions | None) -> bool:
+    if run_options is None:
+        return True
+    return not any((
+        run_options.save_fit_crop_overlays,
+        run_options.run_trajectory_debug,
+        run_options.run_robot_ray_debug,
+        run_options.run_initial_ray_pair_debug,
+        run_options.run_optimized_ray_pair_debug,
+    ))
 
 
 def _write_selection_table(
@@ -104,6 +122,8 @@ def _run_single_observation_count(
     run_options: RunOptions | None,
     run_data: dict,
     evaluation_dir: Path,
+    prepared_data: PreparedStatisticalCalibration | None = None,
+    max_workers: int = 1,
 ) -> dict:
     if observations_per_subrun <= 0:
         raise ValueError("observations_per_subrun muss positiv sein.")
@@ -128,7 +148,7 @@ def _run_single_observation_count(
             run_optimized_ray_pair_debug=False,
         )
 
-    evaluation_dir.mkdir(parents=True, exist_ok=False)
+    evaluation_dir.mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(random_seed)
     available_indices = np.array(
@@ -144,6 +164,7 @@ def _run_single_observation_count(
     selections: list[dict] = []
     selection_lists: list[dict] = []
     failures: list[dict] = []
+    subrun_tasks: list[tuple[int, str, np.ndarray, Path]] = []
 
     for subrun_index in range(1, num_subruns + 1):
         subrun_name = f"subrun_{subrun_index:03d}"
@@ -155,6 +176,9 @@ def _run_single_observation_count(
             )
         )
         subrun_dir = evaluation_dir / subrun_name
+        subrun_tasks.append(
+            (subrun_index, subrun_name, selected_indices, subrun_dir)
+        )
         selection_lists.append({
             "subrun_index": subrun_index,
             "subrun_name": subrun_name,
@@ -178,25 +202,85 @@ def _run_single_observation_count(
                 ),
             })
 
-        print(f"\n{'=' * 72}")
-        print(
-            f"Intra-Run {subrun_index}/{num_subruns}: "
-            f"{len(selected_indices)} Beobachtungen"
-        )
-        print(f"{'=' * 72}")
-        try:
+    def execute_subrun(task):
+        subrun_index, subrun_name, selected_indices, subrun_dir = task
+        if prepared_data is not None:
+            result = run_prepared_statistical_calibration(
+                prepared=prepared_data,
+                selected_frame_indices=selected_indices.tolist(),
+                result_output_dir=subrun_dir,
+                verbose=0,
+            )
+        else:
             result = run_calibration_app(
                 folder_name=folder_name,
                 options=run_options,
                 observation_frame_indices=selected_indices.tolist(),
                 result_output_dir=subrun_dir,
             )
-            if result is None:
-                raise RuntimeError("Kalibrierung lieferte kein Ergebnis.")
+        if result is None:
+            raise RuntimeError("Kalibrierung lieferte kein Ergebnis.")
+        return subrun_index, subrun_name, result
+
+    if max_workers < 1:
+        raise ValueError("max_workers muss mindestens 1 sein.")
+    if max_workers > 1 and prepared_data is None:
+        raise ValueError(
+            "Parallele Sub-Runs benötigen vorbereitete Kalibrierdaten."
+        )
+
+    if max_workers == 1:
+        completed_tasks = []
+        for task in subrun_tasks:
+            print(
+                f"Intra-Run {task[0]}/{num_subruns}: "
+                f"{len(task[2])} Beobachtungen"
+            )
+            try:
+                completed_tasks.append(execute_subrun(task))
+            except Exception as exc:
+                failures.append({
+                    "subrun_index": task[0],
+                    "subrun_name": task[1],
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                })
+                print(
+                    f"FEHLER in {task[1]}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+    else:
+        print(
+            f"Starte {num_subruns} Sub-Runs mit "
+            f"{max_workers} parallelen Workern."
+        )
+        completed_tasks = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_by_task = {
+                executor.submit(execute_subrun, task): task
+                for task in subrun_tasks
+            }
+            for future, task in future_by_task.items():
+                try:
+                    completed_tasks.append(future.result())
+                except Exception as exc:
+                    failures.append({
+                        "subrun_index": task[0],
+                        "subrun_name": task[1],
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    })
+                    print(
+                        f"FEHLER in {task[1]}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+    for _, subrun_name, result in sorted(completed_tasks):
+        try:
             records.append(_record_from_result(subrun_name, result))
         except Exception as exc:
             failures.append({
-                "subrun_index": subrun_index,
+                "subrun_index": int(subrun_name.rsplit("_", 1)[-1]),
                 "subrun_name": subrun_name,
                 "error_type": type(exc).__name__,
                 "message": str(exc),
@@ -227,6 +311,8 @@ def _run_single_observation_count(
         "sampling": {
             "method": "uniform_random_without_replacement_per_subrun",
             "random_seed": random_seed,
+            "prepared_fast_path": prepared_data is not None,
+            "max_workers": max_workers,
             "num_available_observations": num_available,
             "num_requested_subruns": num_subruns,
             "observations_per_subrun": observations_per_subrun,
@@ -597,6 +683,7 @@ def run_intrarun_evaluation(
     num_subruns: int,
     random_seed: int = 42,
     run_options: RunOptions | None = None,
+    max_workers: int = 1,
 ) -> dict:
     counts, is_sweep = _normalize_observation_counts(observations_per_subrun)
     if num_subruns <= 0:
@@ -617,6 +704,21 @@ def run_intrarun_evaluation(
         / "statistical_evaluation"
         / f"evaluation_{timestamp}"
     )
+    evaluation_dir.mkdir(parents=True, exist_ok=False)
+    use_fast_path = _can_use_prepared_fast_path(run_options)
+    prepared_data = None
+    effective_max_workers = max_workers
+    if use_fast_path:
+        prepared_data = prepare_statistical_calibration(
+            folder_name=folder_name,
+            output_dir=evaluation_dir / "_prepared_full_run",
+        )
+    elif max_workers > 1:
+        print(
+            "Debug-Ausgaben sind aktiviert; verwende die vollständige "
+            "Pipeline sequenziell."
+        )
+        effective_max_workers = 1
 
     if not is_sweep:
         return _run_single_observation_count(
@@ -627,9 +729,10 @@ def run_intrarun_evaluation(
             run_options=run_options,
             run_data=run_data,
             evaluation_dir=evaluation_dir,
+            prepared_data=prepared_data,
+            max_workers=effective_max_workers,
         )
 
-    evaluation_dir.mkdir(parents=True, exist_ok=False)
     folder_width = max(3, len(str(max(counts))))
     image_count_results: list[dict] = []
     failed_image_counts: list[dict] = []
@@ -648,6 +751,8 @@ def run_intrarun_evaluation(
                 run_options=run_options,
                 run_data=run_data,
                 evaluation_dir=count_dir,
+                prepared_data=prepared_data,
+                max_workers=effective_max_workers,
             )
             image_count_results.append(_image_count_record(result, count))
         except Exception as exc:
@@ -697,6 +802,8 @@ def run_intrarun_evaluation(
         "source_run_path": str(run_data["input_folder"]),
         "random_seed_per_image_count": random_seed,
         "num_subruns_per_image_count": num_subruns,
+        "prepared_fast_path": prepared_data is not None,
+        "max_workers": effective_max_workers,
         "requested_image_counts": counts,
         "successful_image_counts": [
             record["observations_per_subrun"]
