@@ -9,6 +9,9 @@ from src.evaluation.grouped_intrarun_evaluation import (
 )
 from src.evaluation.intrarun_evaluation import run_intrarun_evaluation
 from src.evaluation.multirun_evaluation import run_multirun_evaluation
+from src.evaluation.offset_optimization_evaluation import (
+    run_offset_dz_intrarun_optimization,
+)
 
 
 EvaluationMode = Literal[
@@ -16,6 +19,7 @@ EvaluationMode = Literal[
     "multi_run",
     "intra_run",
     "grouped_intra_run",
+    "offset_dz_optimization",
 ]
 
 
@@ -24,6 +28,7 @@ EvaluationMode = Literal[
 # - "multi_run": mehrere komplette Runs mit statistischem Vergleich
 # - "intra_run": zufaellige Teilmengen eines Runs mit statistischem Vergleich
 # - "grouped_intra_run": gleich grosse Teilmengen aus benannten Frame-Bereichen
+# - "offset_dz_optimization": Intra-Run-Statistik fuer variierenden Laser-dz-Offset
 MODE: EvaluationMode = "intra_run"
 
 
@@ -57,7 +62,7 @@ STATISTICAL_MAX_WORKERS = 4
 # ---------------------------------------------------------------------------
 # single_run
 # ---------------------------------------------------------------------------
-SINGLE_RUN_FOLDER = "20260520_094027_robot_calibration"
+SINGLE_RUN_FOLDER = "20260708_122535_robot_calibration"
 
 
 # ---------------------------------------------------------------------------
@@ -81,20 +86,20 @@ MULTI_RUN_OUTPUT_DIR = "data/multirun_evaluation"
 # ---------------------------------------------------------------------------
 # intra_run
 # ---------------------------------------------------------------------------
-INTRA_RUN_FOLDER = "20260701_143829_robot_calibration"
+INTRA_RUN_FOLDER = "20260708_122535_robot_calibration"
 # Einzelwert fuer die bisherige Auswertung oder mehrere Bildanzahlen fuer
 # eine vergleichende Stabilitaetsanalyse, z. B. [20, 40, 60, 80].
-OBSERVATIONS_PER_SUBRUN: int | list[int] = [20, 30, 40, 50, 60, 80, 100, 120, 160, 200]
-NUM_SUBRUNS = 40
+OBSERVATIONS_PER_SUBRUN: int | list[int] = [80]
+NUM_SUBRUNS = 100
 RANDOM_SEED = 42
 
 
 # ---------------------------------------------------------------------------
 # grouped_intra_run
 # ---------------------------------------------------------------------------
-GROUPED_INTRA_RUN_FOLDER = "20260701_143829_robot_calibration"
-GROUPED_OBSERVATIONS_PER_SUBRUN = 30
-GROUPED_NUM_SUBRUNS = 1
+GROUPED_INTRA_RUN_FOLDER = "20260709_120931_robot_calibration"
+GROUPED_OBSERVATIONS_PER_SUBRUN = 100
+GROUPED_NUM_SUBRUNS = 100
 GROUPED_RANDOM_SEED = 42
 
 # Alle Bereichsgrenzen sind inklusiv. Mehrere Tupel in einer Gruppe werden
@@ -113,19 +118,35 @@ GROUPED_RANDOM_SEED = 42
 #]
 
 OBSERVATION_GROUPS = [
-    ObservationGroup(name="ref_0_19_vs_100_109", frame_ranges=((0, 19), (100, 109))),
-    ObservationGroup(name="ref_0_19_vs_110_119", frame_ranges=((0, 19), (110, 119))),
-    ObservationGroup(name="ref_0_19_vs_120_129", frame_ranges=((0, 19), (120, 129))),
-    ObservationGroup(name="ref_0_19_vs_130_139", frame_ranges=((0, 19), (130, 139))),
-    ObservationGroup(name="ref_0_19_vs_140_149", frame_ranges=((0, 19), (140, 149))),
-    ObservationGroup(name="ref_0_19_vs_150_159", frame_ranges=((0, 19), (150, 159))),
-    ObservationGroup(name="ref_0_19_vs_160_169", frame_ranges=((0, 19), (160, 169))),
-    ObservationGroup(name="ref_0_19_vs_170_179", frame_ranges=((0, 19), (170, 179))),
-    ObservationGroup(name="ref_0_19_vs_180_189", frame_ranges=((0, 19), (180, 189))),
-    ObservationGroup(name="ref_0_19_vs_190_199", frame_ranges=((0, 19), (190, 199))),
-
-   
+    ObservationGroup(name="x=-2.5", frame_ranges=((0, 299),)),
+    ObservationGroup(name="x=-2.0", frame_ranges=((300, 599),)),
+    ObservationGroup(name="x=-1.5", frame_ranges=((600, 899),)),
+    ObservationGroup(name="x=-1.0", frame_ranges=((900, 1199),)),
+    ObservationGroup(name="x=-0.5", frame_ranges=((1200, 1499),)),
+    ObservationGroup(name="x=0.0", frame_ranges=((1500, 1799),)),
+    ObservationGroup(name="x=0.5", frame_ranges=((1800, 2099),)),
+    ObservationGroup(name="x=1.0", frame_ranges=((2100, 2399),)),
+    ObservationGroup(name="x=1.5", frame_ranges=((2400, 2699),)),
+    ObservationGroup(name="x=2.0", frame_ranges=((2700, 2999),)),
+    ObservationGroup(name="x=2.5", frame_ranges=((3000, 3299),)),
 ]
+
+
+# ---------------------------------------------------------------------------
+# offset_dz_optimization
+# ---------------------------------------------------------------------------
+OFFSET_OPTIMIZATION_FOLDER = "20260701_143829_robot_calibration"
+OFFSET_DZ_VALUES_M = [
+    0.037,
+    0.0395,
+    0.042,
+    0.0445,
+    0.047,
+]
+OFFSET_OBSERVATIONS_PER_SUBRUN = 40
+OFFSET_NUM_SUBRUNS = 8
+OFFSET_RANDOM_SEED = 42
+OFFSET_OBJECTIVE_METRIC = "translation_mean_variance_mm2"
 
 
 def main() -> None:
@@ -164,6 +185,19 @@ def main() -> None:
             random_seed=GROUPED_RANDOM_SEED,
             run_options=STATISTICAL_RUN_OPTIONS,
             max_workers=STATISTICAL_MAX_WORKERS,
+        )
+        return
+
+    if MODE == "offset_dz_optimization":
+        run_offset_dz_intrarun_optimization(
+            folder_name=OFFSET_OPTIMIZATION_FOLDER,
+            dz_values_m=OFFSET_DZ_VALUES_M,
+            observations_per_subrun=OFFSET_OBSERVATIONS_PER_SUBRUN,
+            num_subruns=OFFSET_NUM_SUBRUNS,
+            random_seed=OFFSET_RANDOM_SEED,
+            run_options=STATISTICAL_RUN_OPTIONS,
+            max_workers=STATISTICAL_MAX_WORKERS,
+            objective_metric=OFFSET_OBJECTIVE_METRIC,
         )
         return
 

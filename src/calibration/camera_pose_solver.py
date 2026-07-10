@@ -12,6 +12,16 @@ from src.calibration.camera_pose_in_robot_frame import (
 )
 
 
+DEFAULT_CAMERA_POSITION_BOUND_DELTA_M = np.array(
+    [0.10, 0.10, 0.10],
+    dtype=float,
+)
+DEFAULT_CAMERA_ROTATION_BOUND_DELTA_DEG = np.array(
+    [5.0, 5.0, 5.0],
+    dtype=float,
+)
+
+
 @dataclass
 class CameraPoseOptimizationResult:
     initial_params: np.ndarray
@@ -202,15 +212,15 @@ def solve_camera_pose_from_ray_pairs(
     x0 = camera_pose_to_params(initial_pose_R)
 
     if position_bounds_m is None:
-        lower_xyz = x0[:3] - np.array([0.25, 0.25, 0.25], dtype=float)
-        upper_xyz = x0[:3] + np.array([0.25, 0.25, 0.25], dtype=float)
+        lower_xyz = x0[:3] - DEFAULT_CAMERA_POSITION_BOUND_DELTA_M
+        upper_xyz = x0[:3] + DEFAULT_CAMERA_POSITION_BOUND_DELTA_M
     else:
         lower_xyz = np.asarray(position_bounds_m[0], dtype=float).reshape(3)
         upper_xyz = np.asarray(position_bounds_m[1], dtype=float).reshape(3)
 
     if rotation_bounds_deg is None:
-        lower_rpy = x0[3:6] - np.array([30.0, 30.0, 30.0], dtype=float)
-        upper_rpy = x0[3:6] + np.array([30.0, 30.0, 30.0], dtype=float)
+        lower_rpy = x0[3:6] - DEFAULT_CAMERA_ROTATION_BOUND_DELTA_DEG
+        upper_rpy = x0[3:6] + DEFAULT_CAMERA_ROTATION_BOUND_DELTA_DEG
     else:
         lower_rpy = np.asarray(rotation_bounds_deg[0], dtype=float).reshape(3)
         upper_rpy = np.asarray(rotation_bounds_deg[1], dtype=float).reshape(3)

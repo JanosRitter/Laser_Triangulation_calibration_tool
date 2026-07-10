@@ -6,6 +6,7 @@ from src.calibration.laser_kinematics import (
     build_absolute_transforms_from_trajectory_config,
     pose_xyzrpy_deg_to_transform,
 )
+from src.calibration.laser_rays import FRAME_TABLE_ABSOLUTE_POSE_TRAJECTORY_TYPES
 
 
 def build_ground_truth_transforms_from_frame_table(frame_table: list[dict]) -> list[np.ndarray]:
@@ -140,8 +141,17 @@ def run_trajectory_debug(run_data: dict) -> dict:
     trajectory_config = run_data["run_metadata"]["scan"]["trajectory_config"]
     frame_table = run_data["frame_table"]
 
-    reconstructed = build_absolute_transforms_from_trajectory_config(trajectory_config)
     ground_truth = build_ground_truth_transforms_from_frame_table(frame_table)
+    trajectory_type = trajectory_config.get("type")
+
+    if trajectory_type in FRAME_TABLE_ABSOLUTE_POSE_TRAJECTORY_TYPES:
+        reconstructed = [transform.copy() for transform in ground_truth]
+        reconstruction_source = "frame_table_ground_truth_passthrough"
+    else:
+        reconstructed = build_absolute_transforms_from_trajectory_config(
+            trajectory_config
+        )
+        reconstruction_source = "trajectory_config"
 
     comparison = compare_transform_lists(
         reference_transforms=ground_truth,
@@ -155,6 +165,8 @@ def run_trajectory_debug(run_data: dict) -> dict:
         "ground_truth_transforms": ground_truth,
         "comparison": comparison,
         "summary": summary,
+        "trajectory_type": trajectory_type,
+        "reconstruction_source": reconstruction_source,
     }
 
 

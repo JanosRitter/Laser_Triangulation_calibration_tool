@@ -124,6 +124,15 @@ def _group_result_record(
         "frame_ranges": group_info["frame_ranges_label"],
         "num_nominal_frames": group_info["num_nominal_frames"],
         "num_available_observations": group_info["num_available_observations"],
+        "requested_observations_per_subrun": group_info[
+            "requested_observations_per_subrun"
+        ],
+        "effective_observations_per_subrun": group_info[
+            "effective_observations_per_subrun"
+        ],
+        "used_reduced_observation_count": group_info[
+            "used_reduced_observation_count"
+        ],
         "mean_camera_x_m": float(mean_position_m[0]),
         "mean_camera_y_m": float(mean_position_m[1]),
         "mean_camera_z_m": float(mean_position_m[2]),
@@ -338,11 +347,49 @@ def run_grouped_intrarun_evaluation(
     group_results: list[dict] = []
     group_details: list[dict] = []
     failed_groups: list[dict] = []
+    warnings: list[dict] = []
 
     for index, group in enumerate(observation_groups, start=1):
         group_run_data, group_info = _build_group_run_data(run_data, group)
+        num_available = group_info["num_available_observations"]
+        effective_observations_per_subrun = min(
+            observations_per_subrun,
+            num_available,
+        )
+        group_info["requested_observations_per_subrun"] = observations_per_subrun
+        group_info["effective_observations_per_subrun"] = (
+            effective_observations_per_subrun
+        )
+        group_info["used_reduced_observation_count"] = (
+            effective_observations_per_subrun != observations_per_subrun
+        )
+        if effective_observations_per_subrun < observations_per_subrun:
+            warning = {
+                "group_name": group.name,
+                "frame_ranges": group.ranges_label,
+                "num_nominal_frames": group_info["num_nominal_frames"],
+                "num_available_observations": num_available,
+                "requested_observations_per_subrun": observations_per_subrun,
+                "effective_observations_per_subrun": (
+                    effective_observations_per_subrun
+                ),
+                "message": (
+                    "Zu wenige gueltige Beobachtungen in der Gruppe; "
+                    "verwende alle verfuegbaren gueltigen Beobachtungen "
+                    "pro Subrun."
+                ),
+            }
+            warnings.append(warning)
+            print(
+                "\nHINWEIS: "
+                f"Gruppe {group.name!r} enthaelt nur {num_available} "
+                f"gueltige Beobachtungen, angefordert sind "
+                f"{observations_per_subrun}. Verwende "
+                f"{effective_observations_per_subrun} Beobachtungen "
+                "pro Subrun."
+            )
         group_details.append(group_info)
-        if observations_per_subrun > group_info["num_available_observations"]:
+        if group_info["num_available_observations"] <= 0:
             raise ValueError(
                 f"Gruppe {group.name!r} enthält nur "
                 f"{group_info['num_available_observations']} gültige "
@@ -361,10 +408,16 @@ def run_grouped_intrarun_evaluation(
         )
         print(f"{'#' * 72}")
 
+        print(
+            "Beobachtungen pro Subrun: "
+            f"{effective_observations_per_subrun} "
+            f"(angefordert: {observations_per_subrun})"
+        )
+
         try:
             result = _run_single_observation_count(
                 folder_name=folder_name,
-                observations_per_subrun=observations_per_subrun,
+                observations_per_subrun=effective_observations_per_subrun,
                 num_subruns=num_subruns,
                 random_seed=random_seed,
                 run_options=run_options,
@@ -377,7 +430,7 @@ def run_grouped_intrarun_evaluation(
                 _group_result_record(
                     result,
                     group_info,
-                    observations_per_subrun,
+                    effective_observations_per_subrun,
                 )
             )
         except Exception as exc:
@@ -414,6 +467,7 @@ def run_grouped_intrarun_evaluation(
             "max_workers": effective_max_workers,
         },
         "observation_groups": group_details,
+        "warnings": warnings,
         "statistics_by_observation_group": group_results,
         "failed_groups": failed_groups,
         "artifacts": {

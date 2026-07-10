@@ -24,6 +24,12 @@ DEFAULT_TOOL_OFFSET = {
 }
 
 
+FRAME_TABLE_ABSOLUTE_POSE_TRAJECTORY_TYPES = {
+    "mixed_cartesian_and_joint_offsets",
+    "camera_laser_mixed_offsets",
+}
+
+
 @dataclass
 class Ray3D:
     origin: np.ndarray
@@ -289,6 +295,60 @@ def build_flange_poses_from_trajectory_config(
     )
 
 
+def _pose_dict_to_xyzrpy_deg(pose: dict) -> np.ndarray:
+    return np.array(
+        [
+            float(pose["laser_x"]),
+            float(pose["laser_y"]),
+            float(pose["laser_z"]),
+            float(pose["laser_rx"]),
+            float(pose["laser_ry"]),
+            float(pose["laser_rz"]),
+        ],
+        dtype=float,
+    )
+
+
+def build_flange_poses_from_frame_table_ground_truth(
+    run_data: dict,
+) -> list[np.ndarray]:
+    """
+    Baut Flansch-/Montageplattenposen aus den pro Frame gespeicherten Posen.
+
+    Dieses Format wird für Trajektorien verwendet, bei denen die Bewegung über
+    Joint-Offsets definiert wurde. Die Kalibrierung soll keine Roboter-
+    Vorwärtskinematik nachbilden, sondern die während der Aufnahme gespeicherte
+    absolute Pose verwenden.
+    """
+    frame_poses = run_data.get("ground_truth", {}).get("frame_poses", [])
+    if not frame_poses:
+        raise ValueError(
+            "Keine laser_x/laser_y/laser_z/laser_rx/laser_ry/laser_rz "
+            "Posen in frame_table.csv gefunden."
+        )
+
+    poses_by_frame = {
+        int(pose["frame_idx"]): _pose_dict_to_xyzrpy_deg(pose)
+        for pose in frame_poses
+    }
+    max_frame_idx = max(poses_by_frame)
+    missing = [
+        frame_idx
+        for frame_idx in range(max_frame_idx + 1)
+        if frame_idx not in poses_by_frame
+    ]
+    if missing:
+        raise ValueError(
+            "frame_table.csv enthält keine durchgehenden Frame-Posen. "
+            f"Erste fehlende frame_idx: {missing[:10]}"
+        )
+
+    return [
+        poses_by_frame[frame_idx]
+        for frame_idx in range(max_frame_idx + 1)
+    ]
+
+
 def build_laser_rays_from_flange_poses(
     flange_poses_xyzrpy_deg: list[np.ndarray],
     local_direction: np.ndarray | None = None,
@@ -315,6 +375,37 @@ def build_laser_rays_from_flange_poses(
     return rays
 
 
+def resolve_tool_offset_from_run_metadata(run_metadata: dict) -> dict:
+    """
+    Ermittelt den Tool-Offset für reale Roboter-Runs.
+
+    Aktuelles Capture-Format:
+        run_metadata["tool_offset"]
+
+    Älteres/alternatives Format:
+        run_metadata["scan"]["trajectory_config"]["tool_offset"]
+
+    Wenn keine der beiden Angaben existiert, wird aus Legacy-Kompatibilität
+    der bisherige DEFAULT_TOOL_OFFSET verwendet.
+    """
+    if "tool_offset" in run_metadata and run_metadata["tool_offset"] is not None:
+        return run_metadata["tool_offset"]
+
+    trajectory_config = (
+        run_metadata
+        .get("scan", {})
+        .get("trajectory_config", {})
+    )
+
+    if (
+        "tool_offset" in trajectory_config
+        and trajectory_config["tool_offset"] is not None
+    ):
+        return trajectory_config["tool_offset"]
+
+    return DEFAULT_TOOL_OFFSET
+
+
 def build_laser_rays_robot_base_from_run_data(
     run_data: dict,
     local_direction: np.ndarray | None = None,
@@ -336,13 +427,19 @@ def build_laser_rays_robot_base_from_run_data(
     if local_direction is None:
         local_direction = DEFAULT_LOCAL_LASER_DIRECTION_L
 
-    trajectory_config = run_data["run_metadata"]["scan"]["trajectory_config"]
+    run_metadata = run_data["run_metadata"]
+    trajectory_config = run_metadata["scan"]["trajectory_config"]
+    tool_offset = resolve_tool_offset_from_run_metadata(run_metadata)
 
-    tool_offset = trajectory_config.get("tool_offset", DEFAULT_TOOL_OFFSET)
-
-    flange_poses = build_flange_poses_from_trajectory_config(
-        trajectory_config
-    )
+    trajectory_type = trajectory_config.get("type")
+    if trajectory_type in FRAME_TABLE_ABSOLUTE_POSE_TRAJECTORY_TYPES:
+        flange_poses = build_flange_poses_from_frame_table_ground_truth(
+            run_data
+        )
+    else:
+        flange_poses = build_flange_poses_from_trajectory_config(
+            trajectory_config
+        )
 
     return build_laser_rays_from_flange_poses(
         flange_poses_xyzrpy_deg=flange_poses,

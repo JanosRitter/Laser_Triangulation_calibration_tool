@@ -335,16 +335,6 @@ def run_calibration_app(
             camera_rays_C=camera_rays_C,
             initial_pose_R=camera_pose_initial_R,
             frame_indices=frame_indices,
-            position_bounds_m=(
-                camera_pose_initial_R.translation
-                - np.array([0.20, 0.20, 0.20], dtype=float),
-                camera_pose_initial_R.translation
-                + np.array([0.20, 0.20, 0.20], dtype=float),
-            ),
-            rotation_bounds_deg=(
-                np.array([-20, -20.0, +150.0], dtype=float),
-                np.array([+20.0, +20.0, +210.0], dtype=float),
-            ),
             verbose=1,
         )
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -96,6 +97,33 @@ def prepare_statistical_calibration(
     )
 
 
+def prepared_statistical_calibration_with_tool_offset(
+    prepared: PreparedStatisticalCalibration,
+    tool_offset: dict,
+) -> PreparedStatisticalCalibration:
+    """
+    Reuses the expensive image/crop preparation and rebuilds only laser rays.
+
+    This is useful for statistical offset studies where the image observations
+    and camera rays stay fixed, but the laser origin/orientation relative to
+    the robot flange is varied.
+    """
+    run_data = deepcopy(prepared.run_data)
+    run_data["run_metadata"]["tool_offset"] = deepcopy(tool_offset)
+    all_laser_rays = build_laser_rays_robot_base_from_run_data(
+        run_data=run_data,
+        local_direction=np.array([1.0, 0.0, 0.0], dtype=float),
+    )
+    return replace(
+        prepared,
+        run_data=run_data,
+        laser_rays_R_by_frame={
+            frame_idx: all_laser_rays[frame_idx]
+            for frame_idx in prepared.observations_by_frame
+        },
+    )
+
+
 def run_prepared_statistical_calibration(
     prepared: PreparedStatisticalCalibration,
     selected_frame_indices: list[int],
@@ -141,14 +169,6 @@ def run_prepared_statistical_calibration(
         camera_rays_C=camera_rays_C,
         initial_pose_R=initial_pose,
         frame_indices=frame_indices,
-        position_bounds_m=(
-            initial_pose.translation - np.array([0.20, 0.20, 0.20]),
-            initial_pose.translation + np.array([0.20, 0.20, 0.20]),
-        ),
-        rotation_bounds_deg=(
-            np.array([-20.0, -20.0, +150.0]),
-            np.array([+20.0, +20.0, +210.0]),
-        ),
         verbose=verbose,
     )
     optimized_pose = optimization.optimized_pose_R
