@@ -62,7 +62,7 @@ STATISTICAL_MAX_WORKERS = 4
 # ---------------------------------------------------------------------------
 # single_run
 # ---------------------------------------------------------------------------
-SINGLE_RUN_FOLDER = "20260708_122535_robot_calibration"
+SINGLE_RUN_FOLDER = "20260710_120750_robot_calibration"
 
 
 # ---------------------------------------------------------------------------
@@ -86,19 +86,19 @@ MULTI_RUN_OUTPUT_DIR = "data/multirun_evaluation"
 # ---------------------------------------------------------------------------
 # intra_run
 # ---------------------------------------------------------------------------
-INTRA_RUN_FOLDER = "20260708_122535_robot_calibration"
+INTRA_RUN_FOLDER = "20260710_120750_robot_calibration"
 # Einzelwert fuer die bisherige Auswertung oder mehrere Bildanzahlen fuer
 # eine vergleichende Stabilitaetsanalyse, z. B. [20, 40, 60, 80].
-OBSERVATIONS_PER_SUBRUN: int | list[int] = [80]
-NUM_SUBRUNS = 100
+OBSERVATIONS_PER_SUBRUN: int | list[int] = [150]
+NUM_SUBRUNS = 1000
 RANDOM_SEED = 42
 
 
 # ---------------------------------------------------------------------------
 # grouped_intra_run
 # ---------------------------------------------------------------------------
-GROUPED_INTRA_RUN_FOLDER = "20260709_120931_robot_calibration"
-GROUPED_OBSERVATIONS_PER_SUBRUN = 100
+GROUPED_INTRA_RUN_FOLDER = "20260710_120750_robot_calibration"
+GROUPED_OBSERVATIONS_PER_SUBRUN = 60
 GROUPED_NUM_SUBRUNS = 100
 GROUPED_RANDOM_SEED = 42
 
@@ -118,19 +118,17 @@ GROUPED_RANDOM_SEED = 42
 #]
 
 OBSERVATION_GROUPS = [
-    ObservationGroup(name="x=-2.5", frame_ranges=((0, 299),)),
-    ObservationGroup(name="x=-2.0", frame_ranges=((300, 599),)),
-    ObservationGroup(name="x=-1.5", frame_ranges=((600, 899),)),
-    ObservationGroup(name="x=-1.0", frame_ranges=((900, 1199),)),
-    ObservationGroup(name="x=-0.5", frame_ranges=((1200, 1499),)),
-    ObservationGroup(name="x=0.0", frame_ranges=((1500, 1799),)),
-    ObservationGroup(name="x=0.5", frame_ranges=((1800, 2099),)),
-    ObservationGroup(name="x=1.0", frame_ranges=((2100, 2399),)),
-    ObservationGroup(name="x=1.5", frame_ranges=((2400, 2699),)),
-    ObservationGroup(name="x=2.0", frame_ranges=((2700, 2999),)),
-    ObservationGroup(name="x=2.5", frame_ranges=((3000, 3299),)),
+    ObservationGroup(name="main_01_02", frame_ranges=((0, 127),)),
+    ObservationGroup(name="main_01_03", frame_ranges=((0, 63), (128, 191))),
+    ObservationGroup(name="main_01_04", frame_ranges=((0, 63), (192, 255))),
+    ObservationGroup(name="main_01_05", frame_ranges=((0, 63), (256, 319))),
+    ObservationGroup(name="main_01_06", frame_ranges=((0, 63), (320, 383))),
+    ObservationGroup(name="main_01_07", frame_ranges=((0, 63), (384, 447))),
+    ObservationGroup(name="main_01_08", frame_ranges=((0, 63), (448, 511))),
+    ObservationGroup(name="main_01_09", frame_ranges=((0, 63), (512, 575))),
+    ObservationGroup(name="main_01_10", frame_ranges=((0, 63), (576, 639))),
+    ObservationGroup(name="main_01_11", frame_ranges=((0, 63), (640, 703))),
 ]
-
 
 # ---------------------------------------------------------------------------
 # offset_dz_optimization

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
-
 from src.io.calibration_io import load_crop_array
 from src.io.io_utils import save_fit_table_csv
 from src.fitting.crop_fitting import fit_multiple_observations
@@ -24,10 +22,11 @@ def prepare_calibration_observations(
     save_fit_overlays: bool = False,
     fit_overlay_output_dir: str | Path | None = None,
     result_output_dir: str | Path | None = None,
+    print_fit_reject_details: bool = True,
 ) -> dict:
     observations_raw = run_data["observations"]
     if len(observations_raw) == 0:
-        raise ValueError("Keine gültigen Beobachtungen gefunden.")
+        raise ValueError("Keine gueltigen Beobachtungen gefunden.")
 
     def crop_loader(obs):
         return load_crop_array(run_data["input_folder"], obs["crop_npy_file"])
@@ -63,18 +62,28 @@ def prepare_calibration_observations(
     result_output_dir.mkdir(parents=True, exist_ok=True)
     fit_table_path = result_output_dir / "laser_point_fit_table.csv"
     save_fit_table_csv(fit_table, fit_table_path)
-    print(f"\n💾 Fit-Tabelle gespeichert: {fit_table_path}")
+    print(f"\nFit-Tabelle gespeichert: {fit_table_path}")
 
-    print("\n🔎 Fit-Reject-Gründe:")
-    for row in fit_table:
+    if print_fit_reject_details:
+        print("\nFit-Reject-Gruende:")
+        for row in fit_table:
+            print(
+                f"frame {row['frame_idx']:3d}: "
+                f"use={row['use_for_calibration']} | "
+                f"reason={row['reject_reason']} | "
+                f"snr={row['snr_estimate']:.3f} | "
+                f"amp={row['amplitude']:.3f} | "
+                f"sigma={row['sigma_mean']:.3f} | "
+                f"border={row['is_near_crop_border']}"
+            )
+    else:
+        num_rejected = sum(
+            1 for row in fit_table if not bool(row["use_for_calibration"])
+        )
         print(
-            f"frame {row['frame_idx']:3d}: "
-            f"use={row['use_for_calibration']} | "
-            f"reason={row['reject_reason']} | "
-            f"snr={row['snr_estimate']:.3f} | "
-            f"amp={row['amplitude']:.3f} | "
-            f"sigma={row['sigma_mean']:.3f} | "
-            f"border={row['is_near_crop_border']}"
+            "\nFit-Reject-Details nicht einzeln ausgegeben "
+            f"({num_rejected}/{len(fit_table)} verworfen); "
+            "Details stehen in laser_point_fit_table.csv."
         )
 
     calib_observations = build_calibration_observations_from_fit_table(
@@ -97,5 +106,3 @@ def prepare_calibration_observations(
         "calib_observations": calib_observations,
         "stats": stats,
     }
-
-
