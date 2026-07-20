@@ -16,6 +16,11 @@ from src.app.calibration_app import RunOptions, run_calibration_app
 
 RUN_TIMESTAMP_PATTERN = re.compile(r"^(?P<timestamp>\d{8}_\d{6})")
 
+DEVIATION_HISTOGRAM_FILENAMES = {
+    "individual": "camera_pose_deviation_histograms_individual_axes.png",
+    "shared": "camera_pose_deviation_histograms_shared_axes.png",
+}
+
 
 @dataclass
 class MultiRunRecord:
@@ -240,6 +245,244 @@ def _write_results_csv(
             })
 
 
+def _nice_histogram_step(raw_step: float) -> float:
+    """Round a positive bin width up to a readable decimal step."""
+    if not np.isfinite(raw_step) or raw_step <= 0.0:
+        return 1.0
+
+    exponent = np.floor(np.log10(raw_step))
+    fraction = raw_step / (10.0 ** exponent)
+    for nice_fraction in (1.0, 2.0, 2.5, 5.0, 10.0):
+        if fraction <= nice_fraction:
+            return float(nice_fraction * (10.0 ** exponent))
+    return float(10.0 ** (exponent + 1.0))
+
+
+def _adaptive_symmetric_histogram_edges(
+    value_arrays: list[np.ndarray],
+) -> np.ndarray:
+    """
+    Build readable, symmetric bins that adapt to spread and sample size.
+
+    Freedman-Diaconis supplies the initial bin width. The resulting bin count
+    is bounded so that small samples do not create mostly empty classes while
+    large samples can show more detail. All observations remain inside the
+    displayed range; no quantile clipping is applied.
+    """
+    finite_values = [
+        np.asarray(values, dtype=float).ravel()
+        for values in value_arrays
+    ]
+    finite_values = [values[np.isfinite(values)] for values in finite_values]
+    finite_values = [values for values in finite_values if values.size]
+    if not finite_values:
+        raise ValueError("Keine endlichen Abweichungswerte fuer Histogramme.")
+
+    combined = np.concatenate(finite_values)
+    num_values = combined.size
+    max_abs = float(np.max(np.abs(combined)))
+    if max_abs == 0.0:
+        return np.array([-0.5, 0.5], dtype=float)
+
+    q25, q75 = np.percentile(combined, [25.0, 75.0])
+    iqr = float(q75 - q25)
+    fd_width = 2.0 * iqr / np.cbrt(num_values) if iqr > 0.0 else np.nan
+    full_width = 2.0 * max_abs
+    sturges_bins = int(np.ceil(np.log2(num_values) + 1.0))
+    estimated_bins = (
+        int(np.ceil(full_width / fd_width))
+        if np.isfinite(fd_width) and fd_width > 0.0
+        else sturges_bins
+    )
+
+    min_bins = min(num_values, 4)
+    max_bins = min(80, max(4, int(np.ceil(2.0 * np.sqrt(num_values)))))
+    target_bins = int(np.clip(estimated_bins, min_bins, max_bins))
+    step = _nice_histogram_step(full_width / target_bins)
+    half_bin_count = max(1, int(np.ceil(max_abs / step)))
+    limit = half_bin_count * step
+    return np.linspace(
+        -limit,
+        limit,
+        2 * half_bin_count + 1,
+        dtype=float,
+    )
+
+
+def _format_histogram_step(step: float) -> str:
+    return f"{step:.6g}"
+
+
+def _draw_deviation_histogram(
+    axis,
+    values: np.ndarray,
+    edges: np.ndarray,
+    title: str,
+    color: str,
+) -> int:
+    finite_values = np.asarray(values, dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    counts, _, _ = axis.hist(
+        finite_values,
+        bins=edges,
+        color=color,
+        edgecolor="white",
+        linewidth=0.6,
+    )
+    axis.axvline(0.0, color="black", linestyle="--", linewidth=1.0)
+    axis.set_title(
+        f"{title}  |  Klassenbreite: "
+        f"{_format_histogram_step(edges[1] - edges[0])}"
+    )
+    axis.grid(True, axis="y", alpha=0.3)
+    axis.set_axisbelow(True)
+    return int(np.max(counts)) if counts.size else 0
+
+
+def _save_deviation_histograms(
+    translation_deviations_mm: np.ndarray,
+    rotation_deviations_deg: np.ndarray,
+    output_dir: Path,
+) -> tuple[Path, Path]:
+    """Save individual-scale and shared-scale 2x3 pose histograms."""
+    translation_deviations_mm = np.asarray(
+        translation_deviations_mm,
+        dtype=float,
+    )
+    rotation_deviations_deg = np.asarray(rotation_deviations_deg, dtype=float)
+    if (
+        translation_deviations_mm.ndim != 2
+        or rotation_deviations_deg.ndim != 2
+        or translation_deviations_mm.shape[1] != 3
+        or rotation_deviations_deg.shape[1] != 3
+    ):
+        raise ValueError("Translations- und Rotationsdaten muessen Form (N, 3) haben.")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    component_colors = ("tab:blue", "tab:orange", "tab:green")
+    row_values = (translation_deviations_mm, rotation_deviations_deg)
+    row_titles = (
+        ("x_R", "y_R", "z_R"),
+        ("dRx", "dRy", "dRz"),
+    )
+    row_units = ("mm", "deg")
+
+    individual_path = output_dir / DEVIATION_HISTOGRAM_FILENAMES["individual"]
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    for row_index, values in enumerate(row_values):
+        for component_index in range(3):
+            axis = axes[row_index, component_index]
+            edges = _adaptive_symmetric_histogram_edges(
+                [values[:, component_index]]
+            )
+            max_count = _draw_deviation_histogram(
+                axis=axis,
+                values=values[:, component_index],
+                edges=edges,
+                title=row_titles[row_index][component_index],
+                color=component_colors[component_index],
+            )
+            axis.set_xlim(edges[0], edges[-1])
+            axis.set_ylim(0.0, max(1.0, np.ceil(max_count * 1.08)))
+            axis.set_xlabel(f"Abweichung vom Mittelwert [{row_units[row_index]}]")
+            axis.set_ylabel("Anzahl")
+    fig.suptitle("Verteilung der Kamerapose-Abweichungen – individuelle Achsen")
+    fig.tight_layout(rect=(0.02, 0.0, 1.0, 0.96))
+    fig.savefig(individual_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+    shared_path = output_dir / DEVIATION_HISTOGRAM_FILENAMES["shared"]
+    fig, axes = plt.subplots(
+        2,
+        3,
+        figsize=(15, 8),
+        sharex="row",
+        sharey="row",
+    )
+    for row_index, values in enumerate(row_values):
+        shared_edges = _adaptive_symmetric_histogram_edges(
+            [values[:, component_index] for component_index in range(3)]
+        )
+        row_max_count = 0
+        for component_index in range(3):
+            row_max_count = max(
+                row_max_count,
+                _draw_deviation_histogram(
+                    axis=axes[row_index, component_index],
+                    values=values[:, component_index],
+                    edges=shared_edges,
+                    title=row_titles[row_index][component_index],
+                    color=component_colors[component_index],
+                ),
+            )
+            axes[row_index, component_index].set_xlabel(
+                f"Abweichung vom Mittelwert [{row_units[row_index]}]"
+            )
+        for component_index in range(3):
+            axis = axes[row_index, component_index]
+            axis.set_xlim(shared_edges[0], shared_edges[-1])
+            axis.set_ylim(0.0, max(1.0, np.ceil(row_max_count * 1.08)))
+        axes[row_index, 0].set_ylabel("Anzahl")
+    fig.suptitle(
+        "Verteilung der Kamerapose-Abweichungen – gemeinsame Achsen je Einheit"
+    )
+    fig.tight_layout(rect=(0.02, 0.0, 1.0, 0.96))
+    fig.savefig(shared_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+    return individual_path, shared_path
+
+
+def save_deviation_histograms_from_csv(
+    results_csv: str | Path,
+    output_dir: str | Path | None = None,
+) -> tuple[Path, Path]:
+    """
+    Regenerate only the pose-deviation histograms from a results CSV.
+
+    This deliberately avoids loading images or repeating any calibration.
+    """
+    results_csv = Path(results_csv)
+    if output_dir is None:
+        output_dir = results_csv.parent
+
+    translation_columns = (
+        "dx_from_mean_mm",
+        "dy_from_mean_mm",
+        "dz_from_mean_mm",
+    )
+    rotation_columns = (
+        "rotation_deviation_x_deg",
+        "rotation_deviation_y_deg",
+        "rotation_deviation_z_deg",
+    )
+    required_columns = translation_columns + rotation_columns
+
+    rows = []
+    with results_csv.open("r", newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        missing_columns = [
+            column for column in required_columns
+            if column not in (reader.fieldnames or [])
+        ]
+        if missing_columns:
+            raise ValueError(
+                "Fehlende Spalten in Ergebnis-CSV: " + ", ".join(missing_columns)
+            )
+        for row in reader:
+            rows.append([float(row[column]) for column in required_columns])
+
+    if not rows:
+        raise ValueError(f"Ergebnis-CSV ist leer: {results_csv}")
+    values = np.asarray(rows, dtype=float)
+    return _save_deviation_histograms(
+        translation_deviations_mm=values[:, :3],
+        rotation_deviations_deg=values[:, 3:],
+        output_dir=Path(output_dir),
+    )
+
+
 def _save_plots(records: list[MultiRunRecord], output_dir: Path) -> None:
     labels = [record.run_name for record in records]
     short_labels = [label.split("_")[1] if "_" in label else label for label in labels]
@@ -341,6 +584,12 @@ def _save_plots(records: list[MultiRunRecord], output_dir: Path) -> None:
     fig.tight_layout()
     fig.savefig(output_dir / "fit_quality_by_run.png", dpi=180)
     plt.close(fig)
+
+    _save_deviation_histograms(
+        translation_deviations_mm=translation_deviations_mm,
+        rotation_deviations_deg=rotation_vectors_deg,
+        output_dir=output_dir,
+    )
 
 
 def run_multirun_evaluation(

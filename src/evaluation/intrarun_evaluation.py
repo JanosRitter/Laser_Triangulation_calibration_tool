@@ -23,6 +23,7 @@ from src.evaluation.multirun_evaluation import (
     _record_from_result,
     _save_plots,
     _write_results_csv,
+    save_deviation_histograms_from_csv,
 )
 from src.io.calibration_io import load_calibration_run
 
@@ -37,6 +38,17 @@ def _can_use_prepared_fast_path(run_options: RunOptions | None) -> bool:
         run_options.run_initial_ray_pair_debug,
         run_options.run_optimized_ray_pair_debug,
     ))
+
+
+def regenerate_intrarun_deviation_histograms(
+    evaluation_dir: str | Path,
+) -> tuple[Path, Path]:
+    """Regenerate only the deviation histograms from subrun_results.csv."""
+    evaluation_dir = Path(evaluation_dir)
+    return save_deviation_histograms_from_csv(
+        results_csv=evaluation_dir / "subrun_results.csv",
+        output_dir=evaluation_dir,
+    )
 
 
 def _write_selection_table(
