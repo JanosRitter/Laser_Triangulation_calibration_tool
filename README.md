@@ -130,3 +130,18 @@ The directory contains one folder per sub-run, aggregate pose and fit plots,
 sampling coverage plots, `subrun_results.csv`, the complete observation
 assignment in `subrun_observation_selections.csv`, and all configuration and
 statistics in `intrarun_summary.json`.
+
+The intra-run pipeline also creates a standardized 6D parameter-coupling
+analysis from `subrun_results.csv`: Pearson/Spearman heatmaps, a pair plot,
+translation-rotation scatter plots with confidence bands and covariance
+ellipses, PCA plots, parallel coordinates, optional interactive Plotly 3D
+views, numerical CSV/JSON exports, and an automatic Markdown interpretation.
+Existing evaluations can be analyzed without repeating any calibration fit:
+
+```python
+from src.evaluation.intrarun_evaluation import (
+    regenerate_intrarun_parameter_correlation_analysis,
+)
+
+regenerate_intrarun_parameter_correlation_analysis("path/to/evaluation_dir")
+```

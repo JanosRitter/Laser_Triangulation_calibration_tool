@@ -136,16 +136,16 @@ def _save_offset_plots(
         [objective[best_index]],
         color="red",
         zorder=5,
-        label="bestes Grid-Ergebnis",
+        label="Best grid result",
     )
-    axis.set_xlabel("Laser-Offset dz [mm]")
+    axis.set_xlabel("Laser offset dz in mm")
     ylabel = (
-        "Mittlere Translationsvarianz [mm²]"
+        "Mean translation variance in mm²"
         if objective_metric == "translation_mean_variance_mm2"
-        else "RMS-3D-Abweichung [mm]"
+        else "RMS 3D deviation in mm"
     )
     axis.set_ylabel(ylabel)
-    axis.set_title("Offset-dz-Scan: Stabilität der Kameraposition")
+    axis.set_title("Offset dz scan: camera-position stability")
     axis.grid(True, alpha=0.3)
     axis.legend()
     fig.tight_layout()
@@ -163,9 +163,9 @@ def _save_offset_plots(
             "o-",
             label=component,
         )
-    axis.set_xlabel("Laser-Offset dz [mm]")
-    axis.set_ylabel("Sample-Std der Kameraposition [mm]")
-    axis.set_title("Kamerapositionsstreuung je Offset-dz")
+    axis.set_xlabel("Laser offset dz in mm")
+    axis.set_ylabel("Camera-position sample std in mm")
+    axis.set_title("Camera-position spread by offset dz")
     axis.grid(True, alpha=0.3)
     axis.legend()
     fig.tight_layout()
@@ -177,17 +177,17 @@ def _save_offset_plots(
         dz_mm,
         [record["mean_rmse_ray_distance_mm"] for record in sorted_records],
         "o-",
-        label="mittlerer Ray-Pair-RMSE",
+        label="Mean ray-pair RMSE",
     )
     axis.plot(
         dz_mm,
         [record["mean_ray_distance_mm"] for record in sorted_records],
         "o-",
-        label="mittlere Ray-Distanz",
+        label="Mean ray distance",
     )
-    axis.set_xlabel("Laser-Offset dz [mm]")
-    axis.set_ylabel("Ray-Distanz [mm]")
-    axis.set_title("Fitqualität je Offset-dz")
+    axis.set_xlabel("Laser offset dz in mm")
+    axis.set_ylabel("Ray distance in mm")
+    axis.set_title("Fit quality by offset dz")
     axis.grid(True, alpha=0.3)
     axis.legend()
     fig.tight_layout()

@@ -161,7 +161,7 @@ def _save_group_comparison_plots(
         [record["translation_mean_variance_mm2"] for record in records],
         "o-",
     )
-    axes[0, 0].set_ylabel("Mittlere Varianz [mm²]")
+    axes[0, 0].set_ylabel("Mean variance in mm²")
     axes[0, 0].set_title("Translation")
 
     for component in "xyz":
@@ -174,8 +174,8 @@ def _save_group_comparison_plots(
             "o-",
             label=component,
         )
-    axes[0, 1].set_ylabel("Varianz [mm²]")
-    axes[0, 1].set_title("Translationskomponenten")
+    axes[0, 1].set_ylabel("Variance in mm²")
+    axes[0, 1].set_title("Translation components")
     axes[0, 1].legend()
 
     axes[1, 0].plot(
@@ -183,7 +183,7 @@ def _save_group_comparison_plots(
         [record["rotation_mean_variance_deg2"] for record in records],
         "o-",
     )
-    axes[1, 0].set_ylabel("Mittlere Varianz [deg²]")
+    axes[1, 0].set_ylabel("Mean variance in deg²")
     axes[1, 0].set_title("Rotation")
 
     for component in "xyz":
@@ -196,15 +196,15 @@ def _save_group_comparison_plots(
             "o-",
             label=component,
         )
-    axes[1, 1].set_ylabel("Varianz [deg²]")
-    axes[1, 1].set_title("Rotationsvektorkomponenten")
+    axes[1, 1].set_ylabel("Variance in deg²")
+    axes[1, 1].set_title("Rotation-vector components")
     axes[1, 1].legend()
 
     for axis in axes.flat:
         axis.set_xticks(x, labels, rotation=25, ha="right")
         axis.grid(True, alpha=0.3)
 
-    fig.suptitle("Kalibrierungsstabilität nach Beobachtungsgruppe")
+    fig.suptitle("Calibration stability by observation group")
     fig.tight_layout()
     fig.savefig(output_dir / "stability_by_observation_group.png", dpi=180)
     plt.close(fig)
@@ -214,15 +214,15 @@ def _save_group_comparison_plots(
         x,
         [record["translation_rms_3d_deviation_mm"] for record in records],
     )
-    axes[0, 0].set_ylabel("RMS-Positionsabweichung [mm]")
-    axes[0, 0].set_title("Positionsstreuung")
+    axes[0, 0].set_ylabel("RMS position deviation in mm")
+    axes[0, 0].set_title("Position spread")
 
     axes[0, 1].bar(
         x,
         [record["rotation_rms_angular_deviation_deg"] for record in records],
     )
-    axes[0, 1].set_ylabel("RMS-Winkelabweichung [deg]")
-    axes[0, 1].set_title("Orientierungsstreuung")
+    axes[0, 1].set_ylabel("RMS angular deviation in deg")
+    axes[0, 1].set_title("Orientation spread")
 
     axes[1, 0].errorbar(
         x,
@@ -234,22 +234,22 @@ def _save_group_comparison_plots(
         fmt="o",
         capsize=4,
     )
-    axes[1, 0].set_ylabel("Ray-Pair-RMSE [mm]")
-    axes[1, 0].set_title("Fitqualität: Mittelwert ± 1σ")
+    axes[1, 0].set_ylabel("Ray-pair RMSE in mm")
+    axes[1, 0].set_title("Fit quality: mean ± 1σ")
 
     axes[1, 1].bar(
         x,
         [record["solver_success_rate"] * 100.0 for record in records],
     )
-    axes[1, 1].set_ylabel("Solver-Erfolgsquote [%]")
+    axes[1, 1].set_ylabel("Solver success rate in %")
     axes[1, 1].set_ylim(0.0, 105.0)
-    axes[1, 1].set_title("Solver-Verhalten")
+    axes[1, 1].set_title("Solver behavior")
 
     for axis in axes.flat:
         axis.set_xticks(x, labels, rotation=25, ha="right")
         axis.grid(True, axis="y", alpha=0.3)
 
-    fig.suptitle("Qualitätskennzahlen nach Beobachtungsgruppe")
+    fig.suptitle("Quality metrics by observation group")
     fig.tight_layout()
     fig.savefig(output_dir / "quality_by_observation_group.png", dpi=180)
     plt.close(fig)
@@ -285,15 +285,15 @@ def _save_group_comparison_plots(
         s=140,
         linewidths=2.5,
         color="black",
-        label="Mittelwert aller Gruppen",
+        label="Mean across all groups",
     )
     spans = np.ptp(mean_positions_mm, axis=0)
     largest_span = max(float(np.max(spans)), 1e-9)
     axis.set_box_aspect(np.maximum(spans, largest_span * 0.05))
-    axis.set_xlabel("x_R [mm]")
-    axis.set_ylabel("y_R [mm]")
-    axis.set_zlabel("z_R [mm]")
-    axis.set_title("Mittlere Kameraposition je Beobachtungsgruppe")
+    axis.set_xlabel("x_R in mm")
+    axis.set_ylabel("y_R in mm")
+    axis.set_zlabel("z_R in mm")
+    axis.set_title("Mean camera position by observation group")
     axis.legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
     fig.tight_layout()
     fig.savefig(

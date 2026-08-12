@@ -21,6 +21,10 @@ DEVIATION_HISTOGRAM_FILENAMES = {
     "shared": "camera_pose_deviation_histograms_shared_axes.png",
 }
 
+CAMERA_POSITION_DIRECTION_3D_FILENAME = (
+    "camera_position_and_direction_3d.png"
+)
+
 
 @dataclass
 class MultiRunRecord:
@@ -331,7 +335,7 @@ def _draw_deviation_histogram(
     )
     axis.axvline(0.0, color="black", linestyle="--", linewidth=1.0)
     axis.set_title(
-        f"{title}  |  Klassenbreite: "
+        f"{title}  |  Bin width: "
         f"{_format_histogram_step(edges[1] - edges[0])}"
     )
     axis.grid(True, axis="y", alpha=0.3)
@@ -385,9 +389,11 @@ def _save_deviation_histograms(
             )
             axis.set_xlim(edges[0], edges[-1])
             axis.set_ylim(0.0, max(1.0, np.ceil(max_count * 1.08)))
-            axis.set_xlabel(f"Abweichung vom Mittelwert [{row_units[row_index]}]")
-            axis.set_ylabel("Anzahl")
-    fig.suptitle("Verteilung der Kamerapose-Abweichungen – individuelle Achsen")
+            axis.set_xlabel(
+                f"Deviation from mean in {row_units[row_index]}"
+            )
+            axis.set_ylabel("Count")
+    fig.suptitle("Camera-pose deviation distributions – individual axes")
     fig.tight_layout(rect=(0.02, 0.0, 1.0, 0.96))
     fig.savefig(individual_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
@@ -417,15 +423,15 @@ def _save_deviation_histograms(
                 ),
             )
             axes[row_index, component_index].set_xlabel(
-                f"Abweichung vom Mittelwert [{row_units[row_index]}]"
+                f"Deviation from mean in {row_units[row_index]}"
             )
         for component_index in range(3):
             axis = axes[row_index, component_index]
             axis.set_xlim(shared_edges[0], shared_edges[-1])
             axis.set_ylim(0.0, max(1.0, np.ceil(row_max_count * 1.08)))
-        axes[row_index, 0].set_ylabel("Anzahl")
+        axes[row_index, 0].set_ylabel("Count")
     fig.suptitle(
-        "Verteilung der Kamerapose-Abweichungen – gemeinsame Achsen je Einheit"
+        "Camera-pose deviation distributions – shared axes by unit"
     )
     fig.tight_layout(rect=(0.02, 0.0, 1.0, 0.96))
     fig.savefig(shared_path, dpi=180, bbox_inches="tight")
@@ -483,6 +489,273 @@ def save_deviation_histograms_from_csv(
     )
 
 
+def _automatic_camera_direction_length_mm(
+    translations_mm: np.ndarray,
+) -> float:
+    """Use the sample std of 3D position distances as display length."""
+    mean_position_mm = np.mean(translations_mm, axis=0)
+    distances_from_mean_mm = np.linalg.norm(
+        translations_mm - mean_position_mm,
+        axis=1,
+    )
+    if len(distances_from_mean_mm) < 2:
+        return 1.0
+    direction_length_mm = float(
+        np.std(distances_from_mean_mm, ddof=1)
+    )
+    if not np.isfinite(direction_length_mm):
+        raise ValueError("Position-distance standard deviation is not finite.")
+    return max(direction_length_mm, 1e-6)
+
+
+def _set_tight_metric_3d_limits_from_points(
+    axis,
+    points: np.ndarray,
+    padding_ratio: float = 0.04,
+) -> None:
+    """Fit the 3D frame tightly while retaining one metric scale on all axes."""
+    points = np.asarray(points, dtype=float)
+    finite_points = points[np.all(np.isfinite(points), axis=1)]
+    if not finite_points.size:
+        raise ValueError("Keine endlichen Punkte fuer 3D-Achsengrenzen vorhanden.")
+
+    minima = np.min(finite_points, axis=0)
+    maxima = np.max(finite_points, axis=0)
+    spans = maxima - minima
+    largest_span = max(float(np.max(spans)), 1e-6)
+    padding = np.maximum(spans * padding_ratio, largest_span * 0.01)
+    lower = minima - padding
+    upper = maxima + padding
+    padded_spans = upper - lower
+    axis.set_xlim(lower[0], upper[0])
+    axis.set_ylim(lower[1], upper[1])
+    axis.set_zlim(lower[2], upper[2])
+    axis.set_box_aspect(
+        np.maximum(padded_spans, float(np.max(padded_spans)) * 0.30)
+    )
+
+
+def save_camera_position_and_direction_3d(
+    records: list[MultiRunRecord],
+    output_dir: str | Path,
+    *,
+    direction_length_mm: float | None = None,
+) -> Path:
+    """
+    Plot every camera pose as a position-anchored optical-axis vector.
+
+    For this visualization only, the arrow direction is -z_C expressed in the
+    robot frame.  The stored camera pose and model convention are not changed.
+    ``direction_length_mm`` changes only the visual arrow length.
+    """
+    if not records:
+        raise ValueError("Mindestens ein MultiRunRecord wird benoetigt.")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    translations_mm = (
+        np.stack([record.translation_m for record in records]) * 1000.0
+    )
+    rotations_R_R_C = np.stack(
+        [record.rotation_matrix for record in records]
+    )
+    directions_R = -rotations_R_R_C[:, :, 2]
+    direction_norms = np.linalg.norm(directions_R, axis=1)
+    if np.any(~np.isfinite(direction_norms)) or np.any(direction_norms <= 1e-12):
+        raise ValueError("Ungueltige Kamerablickrichtung in den Pose-Daten.")
+    directions_R = directions_R / direction_norms[:, None]
+
+    if direction_length_mm is None:
+        direction_length_mm = _automatic_camera_direction_length_mm(
+            translations_mm,
+        )
+    elif not np.isfinite(direction_length_mm) or direction_length_mm <= 0.0:
+        raise ValueError("direction_length_mm muss endlich und positiv sein.")
+    direction_length_mm = float(direction_length_mm)
+
+    mean_rotation, _, _ = _rotation_statistics(records)
+    mean_position_mm = np.mean(translations_mm, axis=0)
+    mean_direction_R = -mean_rotation.as_matrix()[:, 2]
+    endpoints_mm = translations_mm + direction_length_mm * directions_R
+    mean_endpoint_mm = (
+        mean_position_mm + direction_length_mm * mean_direction_R
+    )
+    subrun_alpha = float(
+        np.clip(4.5 / np.sqrt(len(records)), 0.10, 0.45)
+    )
+
+    fig = plt.figure(figsize=(9, 8))
+    axis = fig.add_subplot(111, projection="3d")
+    axis.quiver(
+        translations_mm[:, 0],
+        translations_mm[:, 1],
+        translations_mm[:, 2],
+        directions_R[:, 0],
+        directions_R[:, 1],
+        directions_R[:, 2],
+        length=direction_length_mm,
+        normalize=True,
+        arrow_length_ratio=0.18,
+        color="tab:blue",
+        alpha=subrun_alpha,
+        linewidth=1.8,
+        zorder=2,
+        label="Subrun camera poses",
+    )
+    axis.quiver(
+        mean_position_mm[0],
+        mean_position_mm[1],
+        mean_position_mm[2],
+        mean_direction_R[0],
+        mean_direction_R[1],
+        mean_direction_R[2],
+        length=direction_length_mm,
+        normalize=True,
+        arrow_length_ratio=0.20,
+        color="black",
+        linewidth=4.0,
+        zorder=10,
+        label="Mean camera pose",
+    )
+
+    _set_tight_metric_3d_limits_from_points(
+        axis,
+        np.vstack(
+            [
+                translations_mm,
+                endpoints_mm,
+                mean_position_mm,
+                mean_endpoint_mm,
+            ]
+        ),
+    )
+    axis.set_xlabel("x_R in mm", labelpad=10)
+    axis.set_ylabel("y_R in mm", labelpad=10)
+    axis.set_zlabel("z_R in mm", labelpad=12)
+    axis.locator_params(axis="x", nbins=6)
+    axis.locator_params(axis="y", nbins=6)
+    axis.locator_params(axis="z", nbins=5)
+    axis.set_title(
+        "Camera position and viewing direction in the robot frame\n"
+        f"Direction-vector display length: {direction_length_mm:.3f} mm"
+    )
+    axis.grid(True, alpha=0.3)
+    axis.legend(loc="best")
+    fig.subplots_adjust(left=0.04, right=0.88, bottom=0.07, top=0.88)
+
+    output_path = output_dir / CAMERA_POSITION_DIRECTION_3D_FILENAME
+    fig.savefig(
+        output_path,
+        dpi=180,
+        bbox_inches="tight",
+        pad_inches=0.25,
+    )
+    plt.close(fig)
+    return output_path
+
+
+def _draw_component_deviations(
+    axis,
+    x: np.ndarray,
+    values: np.ndarray,
+    *,
+    ylabel: str,
+    title: str,
+) -> None:
+    width = 0.24
+    for index, component in enumerate("xyz"):
+        axis.bar(
+            x + (index - 1) * width,
+            values[:, index],
+            width,
+            label=f"d{component}",
+        )
+    axis.axhline(0.0, color="black", linewidth=0.8)
+    axis.set_ylabel(ylabel)
+    axis.set_title(title)
+    axis.legend()
+    axis.grid(True, axis="y", alpha=0.3)
+
+
+def _draw_total_deviations(
+    axis,
+    x: np.ndarray,
+    values: np.ndarray,
+    *,
+    ylabel: str,
+    title: str,
+) -> None:
+    axis.bar(x, values)
+    axis.set_ylabel(ylabel)
+    axis.set_title(title)
+    axis.grid(True, axis="y", alpha=0.3)
+
+
+def _save_pose_deviation_plot_set(
+    *,
+    x: np.ndarray,
+    short_labels: list[str],
+    component_values: np.ndarray,
+    total_values: np.ndarray,
+    component_ylabel: str,
+    total_ylabel: str,
+    component_title: str,
+    total_title: str,
+    combined_title: str,
+    combined_path: Path,
+    components_path: Path,
+    total_path: Path,
+) -> tuple[Path, Path, Path]:
+    """Save combined, component-only, and total-only deviation figures."""
+    fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    _draw_component_deviations(
+        axes[0],
+        x,
+        component_values,
+        ylabel=component_ylabel,
+        title=component_title,
+    )
+    _draw_total_deviations(
+        axes[1],
+        x,
+        total_values,
+        ylabel=total_ylabel,
+        title=total_title,
+    )
+    axes[1].set_xticks(x, short_labels, rotation=30, ha="right")
+    fig.suptitle(combined_title)
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
+    fig.savefig(combined_path, dpi=180)
+    plt.close(fig)
+
+    fig, axis = plt.subplots(figsize=(10, 5))
+    _draw_component_deviations(
+        axis,
+        x,
+        component_values,
+        ylabel=component_ylabel,
+        title=component_title,
+    )
+    axis.set_xticks(x, short_labels, rotation=30, ha="right")
+    fig.tight_layout()
+    fig.savefig(components_path, dpi=180)
+    plt.close(fig)
+
+    fig, axis = plt.subplots(figsize=(10, 5))
+    _draw_total_deviations(
+        axis,
+        x,
+        total_values,
+        ylabel=total_ylabel,
+        title=total_title,
+    )
+    axis.set_xticks(x, short_labels, rotation=30, ha="right")
+    fig.tight_layout()
+    fig.savefig(total_path, dpi=180)
+    plt.close(fig)
+    return combined_path, components_path, total_path
+
+
 def _save_plots(records: list[MultiRunRecord], output_dir: Path) -> None:
     labels = [record.run_name for record in records]
     short_labels = [label.split("_")[1] if "_" in label else label for label in labels]
@@ -493,6 +766,10 @@ def _save_plots(records: list[MultiRunRecord], output_dir: Path) -> None:
         translations_mm - np.mean(translations_mm, axis=0)
     )
     _, rotation_vectors_deg, angular_deviations_deg = _rotation_statistics(records)
+    position_deviations_3d_mm = np.linalg.norm(
+        translation_deviations_mm,
+        axis=1,
+    )
     x = np.arange(len(records))
 
     fig, axes = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
@@ -502,32 +779,30 @@ def _save_plots(records: list[MultiRunRecord], output_dir: Path) -> None:
             np.mean(translations_mm[:, axis_index]),
             color="black", linestyle="--", linewidth=1,
         )
-        axis.set_ylabel(f"{component}_R [mm]")
+        axis.set_ylabel(f"{component}_R in mm")
         axis.grid(True, alpha=0.3)
     axes[-1].set_xticks(x, short_labels, rotation=30, ha="right")
-    fig.suptitle("Optimierte Kameraposition je Run")
+    fig.suptitle("Optimized camera position by run")
     fig.tight_layout()
     fig.savefig(output_dir / "camera_position_components.png", dpi=180)
     plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    width = 0.24
-    for index, component in enumerate("xyz"):
-        ax.bar(
-            x + (index - 1) * width,
-            translation_deviations_mm[:, index],
-            width,
-            label=f"d{component}",
-        )
-    ax.axhline(0.0, color="black", linewidth=0.8)
-    ax.set_xticks(x, short_labels, rotation=30, ha="right")
-    ax.set_ylabel("Abweichung vom Mittelwert [mm]")
-    ax.set_title("Positionsabweichungen der Runs")
-    ax.legend()
-    ax.grid(True, axis="y", alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(output_dir / "camera_position_deviations.png", dpi=180)
-    plt.close(fig)
+    _save_pose_deviation_plot_set(
+        x=x,
+        short_labels=short_labels,
+        component_values=translation_deviations_mm,
+        total_values=position_deviations_3d_mm,
+        component_ylabel="Position deviation in mm",
+        total_ylabel="3D position deviation in mm",
+        component_title="Position deviations by component",
+        total_title="Total 3D position deviation",
+        combined_title="Camera-position deviations by run",
+        combined_path=output_dir / "camera_position_deviations.png",
+        components_path=(
+            output_dir / "camera_position_deviation_components.png"
+        ),
+        total_path=output_dir / "camera_position_total_deviation.png",
+    )
 
     fig = plt.figure(figsize=(8, 7))
     ax = fig.add_subplot(111, projection="3d")
@@ -540,37 +815,34 @@ def _save_plots(records: list[MultiRunRecord], output_dir: Path) -> None:
     for index, label in enumerate(short_labels):
         ax.text(*translations_mm[index], f" {label}", fontsize=8)
     mean = np.mean(translations_mm, axis=0)
-    ax.scatter(*mean, marker="x", s=120, color="black", label="Mittelwert")
-    ax.set_xlabel("x_R [mm]")
-    ax.set_ylabel("y_R [mm]")
-    ax.set_zlabel("z_R [mm]")
-    ax.set_title("Streuung des Kamerazentrums im Roboter-KS")
+    ax.scatter(*mean, marker="x", s=120, color="black", label="Mean")
+    ax.set_xlabel("x_R in mm")
+    ax.set_ylabel("y_R in mm")
+    ax.set_zlabel("z_R in mm")
+    ax.set_title("Camera-center distribution in the robot frame")
     ax.legend()
     fig.tight_layout()
     fig.savefig(output_dir / "camera_position_3d.png", dpi=180)
     plt.close(fig)
 
-    fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-    width = 0.24
-    for index, component in enumerate("xyz"):
-        axes[0].bar(
-            x + (index - 1) * width,
-            rotation_vectors_deg[:, index],
-            width,
-            label=f"d{component}",
-        )
-    axes[0].axhline(0.0, color="black", linewidth=0.8)
-    axes[0].set_ylabel("Rotationsvektor [deg]")
-    axes[0].set_title("Orientierungsabweichung von der mittleren Rotation")
-    axes[0].legend()
-    axes[0].grid(True, axis="y", alpha=0.3)
-    axes[1].bar(x, angular_deviations_deg)
-    axes[1].set_ylabel("Gesamtwinkel [deg]")
-    axes[1].set_xticks(x, short_labels, rotation=30, ha="right")
-    axes[1].grid(True, axis="y", alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(output_dir / "camera_orientation_deviations.png", dpi=180)
-    plt.close(fig)
+    save_camera_position_and_direction_3d(records, output_dir)
+
+    _save_pose_deviation_plot_set(
+        x=x,
+        short_labels=short_labels,
+        component_values=rotation_vectors_deg,
+        total_values=angular_deviations_deg,
+        component_ylabel="Rotation vector in deg",
+        total_ylabel="Total angle in deg",
+        component_title="Orientation deviation from the mean rotation",
+        total_title="Total angular deviation",
+        combined_title="Camera-orientation deviations by run",
+        combined_path=output_dir / "camera_orientation_deviations.png",
+        components_path=(
+            output_dir / "camera_orientation_deviation_components.png"
+        ),
+        total_path=output_dir / "camera_orientation_total_deviation.png",
+    )
 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.bar(
@@ -578,8 +850,8 @@ def _save_plots(records: list[MultiRunRecord], output_dir: Path) -> None:
         [record.rmse_ray_distance_m * 1000.0 for record in records],
     )
     ax.set_xticks(x, short_labels, rotation=30, ha="right")
-    ax.set_ylabel("Ray-Pair-RMSE [mm]")
-    ax.set_title("Fitqualität je Run")
+    ax.set_ylabel("Ray-pair RMSE in mm")
+    ax.set_title("Fit quality by run")
     ax.grid(True, axis="y", alpha=0.3)
     fig.tight_layout()
     fig.savefig(output_dir / "fit_quality_by_run.png", dpi=180)

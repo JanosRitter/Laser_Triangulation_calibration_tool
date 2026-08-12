@@ -25,6 +25,9 @@ from src.evaluation.multirun_evaluation import (
     _write_results_csv,
     save_deviation_histograms_from_csv,
 )
+from src.evaluation.parameter_correlation_analysis import (
+    save_parameter_correlation_analysis_from_csv,
+)
 from src.io.calibration_io import load_calibration_run
 
 
@@ -46,6 +49,17 @@ def regenerate_intrarun_deviation_histograms(
     """Regenerate only the deviation histograms from subrun_results.csv."""
     evaluation_dir = Path(evaluation_dir)
     return save_deviation_histograms_from_csv(
+        results_csv=evaluation_dir / "subrun_results.csv",
+        output_dir=evaluation_dir,
+    )
+
+
+def regenerate_intrarun_parameter_correlation_analysis(
+    evaluation_dir: str | Path,
+) -> dict:
+    """Regenerate only the 6D coupling analysis from subrun_results.csv."""
+    evaluation_dir = Path(evaluation_dir)
+    return save_parameter_correlation_analysis_from_csv(
         results_csv=evaluation_dir / "subrun_results.csv",
         output_dir=evaluation_dir,
     )
@@ -87,11 +101,11 @@ def _save_sampling_plots(
         color="black",
         linestyle="--",
         linewidth=1,
-        label="mittlere Auswahlhäufigkeit",
+        label="Mean selection frequency",
     )
     ax.set_xlabel("frame_idx")
-    ax.set_ylabel("Anzahl Auswahlen")
-    ax.set_title("Auswahlhäufigkeit der Beobachtungen")
+    ax.set_ylabel("Selection count")
+    ax.set_title("Observation selection frequency")
     ax.grid(True, axis="y", alpha=0.3)
     ax.legend()
     fig.tight_layout()
@@ -115,11 +129,11 @@ def _save_sampling_plots(
     )
     ax.invert_yaxis()
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("u [px]")
-    ax.set_ylabel("v [px]")
-    ax.set_title("Räumliche Stichprobenabdeckung im Kamerabild")
+    ax.set_xlabel("u in px")
+    ax.set_ylabel("v in px")
+    ax.set_title("Spatial sample coverage in the camera image")
     colorbar = fig.colorbar(scatter, ax=ax)
-    colorbar.set_label("Anzahl Auswahlen")
+    colorbar.set_label("Selection count")
     ax.grid(True, alpha=0.2)
     fig.tight_layout()
     fig.savefig(output_dir / "sampling_coverage_uv.png", dpi=180)
@@ -311,6 +325,9 @@ def _run_single_observation_count(
     statistics = _build_statistics(records)
     _write_results_csv(records, evaluation_dir / "subrun_results.csv")
     _save_plots(records, evaluation_dir)
+    correlation_analysis = regenerate_intrarun_parameter_correlation_analysis(
+        evaluation_dir
+    )
 
     selection_counts = Counter(row["frame_idx"] for row in selections)
     all_selection_frequencies = [
@@ -340,6 +357,17 @@ def _run_single_observation_count(
         "subruns": selection_lists,
         "failures": failures,
         "statistics": statistics,
+        "parameter_correlation_analysis": {
+            "analysis_json": str(
+                correlation_analysis["output_paths"]["analysis_json"]
+            ),
+            "summary_markdown": str(
+                correlation_analysis["output_paths"]["summary_markdown"]
+            ),
+            "translation_rotation_coupling_detected": correlation_analysis[
+                "analysis"
+            ]["interpretation"]["translation_rotation_coupling_detected"],
+        },
     }
     summary_path = evaluation_dir / "intrarun_summary.json"
     with summary_path.open("w", encoding="utf-8") as handle:
@@ -362,6 +390,7 @@ def _run_single_observation_count(
         "statistics": statistics,
         "evaluation_dir": evaluation_dir,
         "summary_path": summary_path,
+        "parameter_correlation_analysis": correlation_analysis,
     }
 
 
@@ -534,7 +563,7 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
         [record["translation_mean_variance_mm2"] for record in sorted_records],
         "o-",
     )
-    axes[0, 0].set_ylabel("Mittlere Varianz [mm²]")
+    axes[0, 0].set_ylabel("Mean variance in mm²")
     axes[0, 0].set_title("Translation")
 
     for component in "xyz":
@@ -547,8 +576,8 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
             "o-",
             label=component,
         )
-    axes[0, 1].set_ylabel("Varianz [mm²]")
-    axes[0, 1].set_title("Translationskomponenten")
+    axes[0, 1].set_ylabel("Variance in mm²")
+    axes[0, 1].set_title("Translation components")
     axes[0, 1].legend()
 
     axes[1, 0].plot(
@@ -556,7 +585,7 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
         [record["rotation_mean_variance_deg2"] for record in sorted_records],
         "o-",
     )
-    axes[1, 0].set_ylabel("Mittlere Varianz [deg²]")
+    axes[1, 0].set_ylabel("Mean variance in deg²")
     axes[1, 0].set_title("Rotation")
 
     for component in "xyz":
@@ -569,16 +598,16 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
             "o-",
             label=component,
         )
-    axes[1, 1].set_ylabel("Varianz [deg²]")
-    axes[1, 1].set_title("Rotationsvektorkomponenten")
+    axes[1, 1].set_ylabel("Variance in deg²")
+    axes[1, 1].set_title("Rotation-vector components")
     axes[1, 1].legend()
 
     for axis in axes.flat:
-        axis.set_xlabel("Verwendete Bilder pro Subrun")
+        axis.set_xlabel("Images used per subrun")
         axis.set_xticks(image_counts)
         axis.grid(True, alpha=0.3)
 
-    fig.suptitle("Kalibrierungsstabilität über der Anzahl verwendeter Bilder")
+    fig.suptitle("Calibration stability by number of images used")
     fig.tight_layout()
     fig.savefig(output_dir / "stability_vs_image_count.png", dpi=180)
     plt.close(fig)
@@ -594,8 +623,8 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
         fmt="o-",
         capsize=4,
     )
-    axes[0, 0].set_ylabel("Mittlere Ray-Distanz [mm]")
-    axes[0, 0].set_title("Mittlere Fitqualität")
+    axes[0, 0].set_ylabel("Mean ray distance in mm")
+    axes[0, 0].set_title("Mean fit quality")
 
     axes[0, 1].errorbar(
         image_counts,
@@ -607,8 +636,8 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
         fmt="o-",
         capsize=4,
     )
-    axes[0, 1].set_ylabel("Ray-Pair-RMSE [mm]")
-    axes[0, 1].set_title("Mittlerer RMSE")
+    axes[0, 1].set_ylabel("Ray-pair RMSE in mm")
+    axes[0, 1].set_title("Mean RMSE")
 
     axes[1, 0].plot(
         image_counts,
@@ -618,8 +647,8 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
         ],
         "o-",
     )
-    axes[1, 0].set_ylabel("Maximale Ray-Distanz [mm]")
-    axes[1, 0].set_title("Schlechtester Wert aller Subruns")
+    axes[1, 0].set_ylabel("Maximum ray distance in mm")
+    axes[1, 0].set_title("Worst value across all subruns")
 
     success_axis = axes[1, 1]
     success_axis.plot(
@@ -627,9 +656,9 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
         [record["solver_success_rate"] * 100.0 for record in sorted_records],
         "o-",
         color="tab:blue",
-        label="Erfolgsquote",
+        label="Success rate",
     )
-    success_axis.set_ylabel("Solver-Erfolgsquote [%]", color="tab:blue")
+    success_axis.set_ylabel("Solver success rate in %", color="tab:blue")
     success_axis.tick_params(axis="y", labelcolor="tab:blue")
     nfev_axis = success_axis.twinx()
     nfev_axis.plot(
@@ -637,21 +666,21 @@ def _save_image_count_plots(records: list[dict], output_dir: Path) -> None:
         [record["mean_solver_nfev"] for record in sorted_records],
         "s--",
         color="tab:orange",
-        label="Funktionsauswertungen",
+        label="Function evaluations",
     )
     nfev_axis.set_ylabel(
-        "Mittlere Funktionsauswertungen",
+        "Mean function evaluations",
         color="tab:orange",
     )
     nfev_axis.tick_params(axis="y", labelcolor="tab:orange")
-    success_axis.set_title("Solver-Verhalten")
+    success_axis.set_title("Solver behavior")
 
     for axis in axes.flat:
-        axis.set_xlabel("Verwendete Bilder pro Subrun")
+        axis.set_xlabel("Images used per subrun")
         axis.set_xticks(image_counts)
         axis.grid(True, alpha=0.3)
 
-    fig.suptitle("Fitqualität über der Anzahl verwendeter Bilder")
+    fig.suptitle("Fit quality by number of images used")
     fig.tight_layout()
     fig.savefig(output_dir / "fit_quality_vs_image_count.png", dpi=180)
     plt.close(fig)

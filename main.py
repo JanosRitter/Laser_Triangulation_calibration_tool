@@ -62,7 +62,7 @@ STATISTICAL_MAX_WORKERS = 4
 # ---------------------------------------------------------------------------
 # single_run
 # ---------------------------------------------------------------------------
-SINGLE_RUN_FOLDER = "20260710_120750_robot_calibration"
+SINGLE_RUN_FOLDER = "20260727_103247_robot_calibration"
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ MULTI_RUN_OUTPUT_DIR = "data/multirun_evaluation"
 # ---------------------------------------------------------------------------
 # intra_run
 # ---------------------------------------------------------------------------
-INTRA_RUN_FOLDER = "20260710_120750_robot_calibration"
+INTRA_RUN_FOLDER = "20260727_124907_robot_calibration"
 # Einzelwert fuer die bisherige Auswertung oder mehrere Bildanzahlen fuer
 # eine vergleichende Stabilitaetsanalyse, z. B. [20, 40, 60, 80].
 OBSERVATIONS_PER_SUBRUN: int | list[int] = [150]
